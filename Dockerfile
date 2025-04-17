@@ -3,7 +3,7 @@ FROM golang:1.24 as builder
 WORKDIR /app
 COPY . .
 RUN go mod download
-RUN go build-o server .
+RUN go build -o server .
 
 FROM debian:bookworm-slim
 WORKDIR /app
