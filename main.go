@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"fmt"
 	"log"
 	"net/http"
@@ -73,9 +72,7 @@ func loginHandler(c *gin.Context) {
 	domain := os.Getenv("NETBIOS_NAME")
 	ldapServer := os.Getenv("LDAP_SERVER")
 
-	l, err := ldap.DialTLS("tcp", ldapServer, &tls.Config{
-		InsecureSkipVerify: true,
-	})
+	l, err := ldap.DialURL("ldap://" + ldapServer + ":389")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "LDAP connection failed"})
 		return
