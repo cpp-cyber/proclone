@@ -33,13 +33,13 @@ func main() {
 	r.Use(sessions.Sessions("mysession", store))
 
 	// export public route
-	r.POST("/login", loginHandler)
+	r.POST("/api/login", loginHandler)
 
-	// private routes
+	// authenticated routes
 	auth := r.Group("/")
 	auth.Use(authRequired)
 	auth.GET("/profile", profileHandler)
-	auth.POST("/logout", logoutHandler)
+	auth.POST("/api/logout", logoutHandler)
 
 	// get port to run server on via. PC_PORT env variable
 	port := os.Getenv("PC_PORT")
