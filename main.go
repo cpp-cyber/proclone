@@ -104,7 +104,7 @@ func loginHandler(c *gin.Context) {
 	searchRequest := ldap.NewSearchRequest(
 		baseDN,
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
-		fmt.Sprintf("(&(objectClass=person)(uid=%s))", username),
+		fmt.Sprintf("(sAMAccountName=%s)", username),
 		[]string{"dn"},
 		nil,
 	)
