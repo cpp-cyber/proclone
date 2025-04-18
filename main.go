@@ -55,6 +55,7 @@ func main() {
 	}
 }
 
+// called by /api/login post request
 func loginHandler(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -72,25 +73,66 @@ func loginHandler(c *gin.Context) {
 	}
 
 	// LDAP stuff
-	domain := os.Getenv("NETBIOS_NAME")
 	ldapServer := os.Getenv("LDAP_SERVER")
 	baseDN := os.Getenv("LDAP_BASE_DN")
+	bindDN := os.Getenv("LDAP_BIND_DN")
+	bindPassword := os.Getenv("LDAP_BIND_PASSWORD")
 
-	userDN := fmt.Sprintf("uid=%s,%s", username, baseDN)
+	// for deployment debugging purposes
+	if ldapServer == "" || baseDN == "" || bindDN == "" || bindPassword == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "LDAP configuration is missing"})
+		return
+	}
 
+	// connect to LDAP server
 	l, err := ldap.DialURL("ldap://" + ldapServer + ":389")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("LDAP bind to %s failed", ldapServer)})
 		return
 	}
+
+	// make sure connection closes at function return even if error occurs
 	defer l.Close()
 
-	err = l.Bind(userDN, password)
+	// First bind as service account
+	err = l.Bind(bindDN, bindPassword)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid ldap service account"})
 		return
 	}
 
+	// Define search request
+	searchRequest := ldap.NewSearchRequest(
+		baseDN,
+		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+		fmt.Sprintf("(&(objectClass=person)(uid=%s))", username),
+		[]string{"dn"},
+		nil,
+	)
+
+	// search for user
+	sr, err := l.Search(searchRequest)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "user not found in LDAP"})
+		return
+	}
+
+	// handle user not found
+	if len(sr.Entries) != 1 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found or multiple users found"})
+		return
+	}
+
+	userDN := sr.Entries[0].dn
+
+	// bind as user to verify password
+	err = l.Bind(userDN, password)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	// create session
 	session := sessions.Default(c)
 	session.Set("authenticated", true)
 	session.Set("username", username)
