@@ -74,7 +74,7 @@ func loginHandler(c *gin.Context) {
 
 	l, err := ldap.DialURL("ldap://" + ldapServer + ":389")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "LDAP connection failed"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "LDAP connection failed" + domain + " " + ldapServer})
 		return
 	}
 	defer l.Close()
