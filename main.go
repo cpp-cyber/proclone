@@ -15,14 +15,17 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
+// struct to hold username and password received from post request
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
+// init the environment
 func init() {
 	_ = godotenv.Load()
 }
+
 
 func main() {
 	r := gin.Default()
@@ -38,7 +41,7 @@ func main() {
 	// authenticated routes
 	auth := r.Group("/")
 	auth.Use(authRequired)
-	auth.GET("/profile", profileHandler)
+	auth.GET("/api/profile", profileHandler)
 	auth.POST("/api/logout", logoutHandler)
 
 	// get port to run server on via. PC_PORT env variable
@@ -71,16 +74,18 @@ func loginHandler(c *gin.Context) {
 	// LDAP stuff
 	domain := os.Getenv("NETBIOS_NAME")
 	ldapServer := os.Getenv("LDAP_SERVER")
+	baseDN := os.Getenv("LDAP_BASE_DN")
+
+	userDN := fmt.Sprintf("uid=%s,%s", username, baseDN)
 
 	l, err := ldap.DialURL("ldap://" + ldapServer + ":389")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "LDAP connection failed" + domain + " " + ldapServer})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("LDAP bind to %s failed", ldapServer)})
 		return
 	}
 	defer l.Close()
 
-	userPrincipal := fmt.Sprintf("%s@%s", username, domain)
-	err = l.Bind(userPrincipal, password)
+	err = l.Bind(userDN, password)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
