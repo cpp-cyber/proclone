@@ -26,7 +26,6 @@ func init() {
 	_ = godotenv.Load()
 }
 
-
 func main() {
 	r := gin.Default()
 
@@ -123,7 +122,7 @@ func loginHandler(c *gin.Context) {
 		return
 	}
 
-	userDN := sr.Entries[0].dn
+	userDN := sr.Entries[0].DN
 
 	// bind as user to verify password
 	err = l.Bind(userDN, password)
