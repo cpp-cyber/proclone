@@ -32,6 +32,14 @@ func main() {
 	// store session cookie
 	// **IN PROD USE REAL SECURE KEY**
 	store := cookie.NewStore([]byte(os.Getenv("SECRET_KEY")))
+
+	// further cookie security
+	store.Options(sessions.Options{
+		MaxAge:   3600,
+		HttpOnly: true,
+		Secure:   true,
+	})
+
 	r.Use(sessions.Sessions("mysession", store))
 
 	// export public route
@@ -41,6 +49,7 @@ func main() {
 	auth := r.Group("/")
 	auth.Use(authRequired)
 	auth.GET("/api/profile", profileHandler)
+	auth.GET("/api/session", sessionHandler)
 	auth.POST("/api/logout", logoutHandler)
 
 	// get port to run server on via. PC_PORT env variable
@@ -155,10 +164,29 @@ func profileHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Hello, %s!", username)})
 }
 
-// protect routes helper function
-func authRequired(c *gin.Context) {
+// check if user is authenticated
+func isAuthenticated(c *gin.Context) (bool, string) {
 	session := sessions.Default(c)
-	if auth, ok := session.Get("authenticated").(bool); !ok || !auth {
+	auth, ok := session.Get("authenticated").(bool)
+	if !ok || !auth {
+		return false, ""
+	}
+	username, _ := session.Get("username").(string)
+	return true, username
+}
+
+// api endpoint that returns true if user is already authenticated
+func sessionHandler(c *gin.Context) {
+	if ok, username := isAuthenticated(c); ok {
+		c.JSON(http.StatusOK, gin.H{"authenticated": true, "username": username})
+	} else {
+		c.JSON(http.StatusUnauthorized, gin.H{"authenticated": false})
+	}
+}
+
+// protected routes helper function
+func authRequired(c *gin.Context) {
+	if ok, _ := isAuthenticated(c); !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		c.Abort()
 		return
