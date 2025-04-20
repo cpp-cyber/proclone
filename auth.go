@@ -69,7 +69,7 @@ func loginHandler(c *gin.Context) {
 		baseDN,
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 		fmt.Sprintf("(sAMAccountName=%s)", username),
-		[]string{"dn"},
+		[]string{"dn", "memberOf"},
 		nil,
 	)
 
