@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -98,8 +99,9 @@ func loginHandler(c *gin.Context) {
 
 	// check if user is in "Domain Admins"
 	groups := sr.Entries[0].GetAttributeValues("memberOf")
+	log.Println("logging user membership:")
 	for _, group := range groups {
-		fmt.Println("User is a member of: ", group)
+		log.Println("User is a member of: ", group)
 		if strings.Contains(strings.ToLower(group), "cn=domain admins") {
 			isAdmin = true
 			break
