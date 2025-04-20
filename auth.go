@@ -161,7 +161,12 @@ func isAdmin(c *gin.Context) bool {
 // api endpoint that returns true if user is already authenticated
 func sessionHandler(c *gin.Context) {
 	if ok, username := isAuthenticated(c); ok {
-		c.JSON(http.StatusOK, gin.H{"authenticated": true, "username": username})
+		is_admin := isAdmin(c)
+		c.JSON(http.StatusOK, gin.H{
+			"authenticated": true,
+			"username":      username,
+			"isAdmin":       is_admin,
+		})
 	} else {
 		c.JSON(http.StatusUnauthorized, gin.H{"authenticated": false})
 	}
