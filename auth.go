@@ -97,7 +97,7 @@ func loginHandler(c *gin.Context) {
 	isAdmin := false
 
 	// check if user is in "Domain Admins"
-	groups := sr.Entries[0].GetAttributeValues("MemberOf")
+	groups := sr.Entries[0].GetAttributeValues("memberOf")
 	for _, group := range groups {
 		if strings.Contains(strings.ToLower(group), "domain admins") {
 			isAdmin = true
