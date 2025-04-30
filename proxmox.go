@@ -19,9 +19,7 @@ import (
 type ProxmoxConfig struct {
 	Host      string
 	Port      string
-	Username  string
-	Password  string
-	Realm     string
+	APIToken  string    // API token for authentication
 	VerifySSL bool
 	Nodes     []string
 }
@@ -39,6 +37,13 @@ type NodeResourceUsage struct {
 // ResourceUsageResponse represents the API response containing resource usage for all nodes
 type ResourceUsageResponse struct {
 	Nodes   []NodeResourceUsage `json:"nodes"`
+	Cluster struct {
+		TotalCPUUsage    float64 `json:"total_cpu_usage"`     // Average CPU usage across all nodes
+		TotalMemoryTotal int64   `json:"total_memory_total"`  // Total memory across all nodes
+		TotalMemoryUsed  int64   `json:"total_memory_used"`   // Total used memory across all nodes
+		TotalStorageTotal int64  `json:"total_storage_total"` // Total storage across all nodes
+		TotalStorageUsed  int64  `json:"total_storage_used"`  // Total used storage across all nodes
+	} `json:"cluster"`
 	Errors  []string            `json:"errors,omitempty"`
 }
 
@@ -62,12 +67,20 @@ type ProxmoxNodeStatus struct {
 
 // loadProxmoxConfig loads and validates Proxmox configuration from environment variables
 func loadProxmoxConfig() (*ProxmoxConfig, error) {
+	tokenID := os.Getenv("PROXMOX_TOKEN_ID")      // The token ID including user and realm
+	tokenSecret := os.Getenv("PROXMOX_TOKEN_SECRET")  // The secret part of the token
+
+	if tokenID == "" {
+		return nil, fmt.Errorf("PROXMOX_TOKEN_ID is required")
+	}
+	if tokenSecret == "" {
+		return nil, fmt.Errorf("PROXMOX_TOKEN_SECRET is required")
+	}
+
 	config := &ProxmoxConfig{
 		Host:      os.Getenv("PROXMOX_HOST"),
 		Port:      os.Getenv("PROXMOX_PORT"),
-		Username:  os.Getenv("PROXMOX_USERNAME"),
-		Password:  os.Getenv("PROXMOX_PASSWORD"),
-		Realm:     os.Getenv("PROXMOX_REALM"),
+		APIToken:  fmt.Sprintf("%s=%s", tokenID, tokenSecret),
 		VerifySSL: os.Getenv("PROXMOX_VERIFY_SSL") == "true",
 	}
 
@@ -76,16 +89,7 @@ func loadProxmoxConfig() (*ProxmoxConfig, error) {
 		return nil, fmt.Errorf("PROXMOX_HOST is required")
 	}
 	if config.Port == "" {
-		config.Port = "8006" // Default Proxmox API port
-	}
-	if config.Username == "" {
-		return nil, fmt.Errorf("PROXMOX_USERNAME is required")
-	}
-	if config.Password == "" {
-		return nil, fmt.Errorf("PROXMOX_PASSWORD is required")
-	}
-	if config.Realm == "" {
-		config.Realm = "pam" // Default realm
+		config.Port = "443" // Default port
 	}
 
 	// Parse nodes list
@@ -97,55 +101,8 @@ func loadProxmoxConfig() (*ProxmoxConfig, error) {
 	return config, nil
 }
 
-// getProxmoxAPIToken authenticates with Proxmox and returns an API token
-func getProxmoxAPIToken(config *ProxmoxConfig) (string, error) {
-	// Create HTTP client with SSL verification based on config
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
-
-	// Prepare login URL
-	loginURL := fmt.Sprintf("https://%s:%s/api2/json/access/ticket", config.Host, config.Port)
-	
-	// Prepare form data
-	form := url.Values{}
-	form.Add("username", config.Username)
-	form.Add("password", config.Password)
-	form.Add("realm", config.Realm)
-
-	// Make login request
-	resp, err := client.PostForm(loginURL, form)
-	if err != nil {
-		return "", fmt.Errorf("failed to authenticate with Proxmox: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read authentication response: %v", err)
-	}
-
-	// Parse response
-	var apiResp ProxmoxAPIResponse
-	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return "", fmt.Errorf("failed to parse authentication response: %v", err)
-	}
-
-	// Extract ticket from response
-	var ticket struct {
-		Ticket string `json:"ticket"`
-	}
-	if err := json.Unmarshal(apiResp.Data, &ticket); err != nil {
-		return "", fmt.Errorf("failed to extract ticket from response: %v", err)
-	}
-
-	return ticket.Ticket, nil
-}
-
 // getNodeStatus fetches the status of a single Proxmox node
-func getNodeStatus(config *ProxmoxConfig, nodeName string, ticket string) (*ProxmoxNodeStatus, error) {
+func getNodeStatus(config *ProxmoxConfig, nodeName string) (*ProxmoxNodeStatus, error) {
 	// Create HTTP client with SSL verification based on config
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
@@ -161,11 +118,8 @@ func getNodeStatus(config *ProxmoxConfig, nodeName string, ticket string) (*Prox
 		return nil, fmt.Errorf("failed to create request: %v", err)
 	}
 
-	// Add authentication cookie
-	req.AddCookie(&http.Cookie{
-		Name:  "PVEAuthCookie",
-		Value: ticket,
-	})
+	// Add Authorization header with API token
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
 
 	// Make request
 	resp, err := client.Do(req)
@@ -221,16 +175,6 @@ func getProxmoxResources(c *gin.Context) {
 		return
 	}
 
-	// Get API token
-	ticket, err := getProxmoxAPIToken(config)
-	if err != nil {
-		log.Printf("Authentication error for user %s: %v", username, err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to authenticate with Proxmox: %v", err),
-		})
-		return
-	}
-
 	// If no nodes specified, return empty response
 	if len(config.Nodes) == 0 {
 		log.Printf("No nodes configured for user %s", username)
@@ -241,9 +185,10 @@ func getProxmoxResources(c *gin.Context) {
 	// Fetch status for each node
 	var nodes []NodeResourceUsage
 	var errors []string
+	response := ResourceUsageResponse{}
 
 	for _, nodeName := range config.Nodes {
-		status, err := getNodeStatus(config, nodeName, ticket)
+		status, err := getNodeStatus(config, nodeName)
 		if err != nil {
 			errorMsg := fmt.Sprintf("Error fetching status for node %s: %v", nodeName, err)
 			log.Printf(errorMsg)
@@ -259,16 +204,25 @@ func getProxmoxResources(c *gin.Context) {
 			StorageTotal: status.Storage.Total,
 			StorageUsed:  status.Storage.Used,
 		})
+
+		// Add to cluster totals
+		response.Cluster.TotalMemoryTotal += status.Memory.Total
+		response.Cluster.TotalMemoryUsed += status.Memory.Used
+		response.Cluster.TotalStorageTotal += status.Storage.Total
+		response.Cluster.TotalStorageUsed += status.Storage.Used
+		response.Cluster.TotalCPUUsage += status.CPU
 	}
 
-	// Prepare response
-	response := ResourceUsageResponse{
-		Nodes: nodes,
+	// Calculate average CPU usage for the cluster
+	if len(nodes) > 0 {
+		response.Cluster.TotalCPUUsage /= float64(len(nodes))
 	}
+
+	response.Nodes = nodes
+	response.Errors = errors
 
 	// If we have any errors but also some successful responses, include errors in response
 	if len(errors) > 0 && len(nodes) > 0 {
-		response.Errors = errors
 		c.JSON(http.StatusPartialContent, response)
 		return
 	}
