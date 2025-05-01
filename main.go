@@ -44,6 +44,9 @@ func main() {
 	// admin routes
 	admin := auth.Group("/admin")
 	admin.Use(adminRequired)
+	
+	// Proxmox resource monitoring endpoint
+	admin.GET("/proxmox/resources", getProxmoxResources)
 
 	// get port to run server on via. PC_PORT env variable
 	port := os.Getenv("PC_PORT")
