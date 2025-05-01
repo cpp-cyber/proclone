@@ -78,7 +78,7 @@ func loadProxmoxConfig() (*ProxmoxConfig, error) {
 	}
 
 	config := &ProxmoxConfig{
-		Host:      os.Getenv("PROXMOX_HOST"),
+		Host:      os.Getenv("PROXMOX_SERVER"),
 		Port:      os.Getenv("PROXMOX_PORT"),
 		APIToken:  fmt.Sprintf("%s=%s", tokenID, tokenSecret),
 		VerifySSL: os.Getenv("PROXMOX_VERIFY_SSL") == "true",
@@ -86,7 +86,7 @@ func loadProxmoxConfig() (*ProxmoxConfig, error) {
 
 	// Validate required fields
 	if config.Host == "" {
-		return nil, fmt.Errorf("PROXMOX_HOST is required")
+		return nil, fmt.Errorf("PROXMOX_SERVER is required")
 	}
 	if config.Port == "" {
 		config.Port = "443" // Default port
