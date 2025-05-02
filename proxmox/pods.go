@@ -88,7 +88,7 @@ func getTemplateResponse(config *ProxmoxConfig) (*[]VirtualResource, error) {
 	for _, r := range *apiResp {
 		if r.Type == "pool" {
 			reg, _ := regexp.Compile("kamino_template_.*")
-			if reg.MatchString(r.Name) {
+			if reg.MatchString(r.ResourcePool) {
 				templates = append(templates, r)
 			}
 		}
