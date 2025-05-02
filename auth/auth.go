@@ -1,4 +1,4 @@
-package main
+package auth
 
 import (
 	"fmt"
@@ -19,7 +19,7 @@ type LoginRequest struct {
 }
 
 // called by /api/login post request
-func loginHandler(c *gin.Context) {
+func LoginHandler(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
@@ -119,7 +119,7 @@ func loginHandler(c *gin.Context) {
 }
 
 // handle clearing session cookies
-func logoutHandler(c *gin.Context) {
+func LogoutHandler(c *gin.Context) {
 	session := sessions.Default(c)
 	session.Clear()
 	session.Save()
@@ -127,7 +127,7 @@ func logoutHandler(c *gin.Context) {
 }
 
 // check logged in profile
-func profileHandler(c *gin.Context) {
+func ProfileHandler(c *gin.Context) {
 	session := sessions.Default(c)
 	username := session.Get("username")
 	isAdmin := session.Get("is_admin")
@@ -162,7 +162,7 @@ func isAdmin(c *gin.Context) bool {
 }
 
 // api endpoint that returns true if user is already authenticated
-func sessionHandler(c *gin.Context) {
+func SessionHandler(c *gin.Context) {
 	if ok, username := isAuthenticated(c); ok {
 		is_admin := isAdmin(c)
 		c.JSON(http.StatusOK, gin.H{
@@ -176,7 +176,7 @@ func sessionHandler(c *gin.Context) {
 }
 
 // auth protected routes helper function
-func authRequired(c *gin.Context) {
+func AuthRequired(c *gin.Context) {
 	if ok, _ := isAuthenticated(c); !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		c.Abort()
@@ -186,7 +186,7 @@ func authRequired(c *gin.Context) {
 }
 
 // admin protected routes helper function
-func adminRequired(c *gin.Context) {
+func AdminRequired(c *gin.Context) {
 	if !isAdmin(c) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden"})
 		c.Abort()
