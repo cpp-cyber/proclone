@@ -73,7 +73,7 @@ func GetProxmoxResources(c *gin.Context) {
 		status, err := getNodeStatus(config, nodeName)
 		if err != nil {
 			errorMsg := fmt.Sprintf("Error fetching status for node %s: %v", nodeName, err)
-			log.Printf(errorMsg)
+			log.Printf("%s", errorMsg)
 			errors = append(errors, errorMsg)
 			continue
 		}
