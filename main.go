@@ -43,6 +43,9 @@ func main() {
 	user.GET("/session", auth.SessionHandler)
 	user.POST("/logout", auth.LogoutHandler)
 
+	// Proxmox User Template endpoints
+	user.GET("/proxmox/templates", proxmox.GetAvailableTemplates)
+
 	// admin routes
 	admin := user.Group("/admin")
 	admin.Use(auth.AdminRequired)
