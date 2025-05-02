@@ -23,7 +23,7 @@ func GetAvailableTemplates(c *gin.Context) {
 	username := session.Get("username")
 
 	// Make sure user is authenticated (redundant)
-	isAuth, username := auth.IsAuthenticated(c)
+	isAuth, _ := auth.IsAuthenticated(c)
 	if !isAuth {
 		log.Printf("Unauthorized access attempt")
 		c.JSON(http.StatusForbidden, gin.H{
@@ -87,8 +87,8 @@ func getTemplateResponse(config *ProxmoxConfig) (*[]VirtualResource, error) {
 	var templates []VirtualResource
 	for _, r := range *apiResp {
 		if r.Type == "pool" {
-			match, _ := regexp.MatchString("kamino_template_.*", r.Name)
-			if match {
+			reg, _ := regexp.Compile("kamino_template_.*")
+			if reg.MatchString(r.Name) {
 				templates = append(templates, r)
 			}
 		}
