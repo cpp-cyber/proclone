@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -33,6 +34,23 @@ type VirtualMachineResponse struct {
 	RunningCount        int              `json:"running_count"`
 }
 
+type VM struct {
+	VMID int    `json:"vmid" binding:"required"`
+	Node string `json:"node" binding:"required"`
+}
+
+type VMPower struct {
+	Success int    `json:"success"`
+	Data    string `json:"data"`
+}
+
+type VMPowerResponse struct {
+	Success int `json:"success"`
+}
+
+/*
+ * ===== GET ALL VIRTUAL MACHINES =====
+ */
 func GetVirtualMachines(c *gin.Context) {
 	session := sessions.Default(c)
 	username := session.Get("username")
@@ -148,4 +166,250 @@ func getVirtualMachines(config *ProxmoxConfig) (*[]VirtualMachine, error) {
 
 	return &vms, nil
 
+}
+
+/*
+ * ====== POWERING OFF VIRTUAL MACHINES ======
+ * POST requires "vmid" and "node" fields
+ */
+func PowerOffVirtualMachine(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("username")
+	isAdmin := session.Get("is_admin")
+
+	// Make sure user is admin (redundant with middleware)
+	if !isAdmin.(bool) {
+		log.Printf("Unauthorized access attempt by user %s", username)
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Only admin users can access vm data",
+		})
+		return
+	}
+
+	// store proxmox config
+	var config *ProxmoxConfig
+	var err error
+	config, err = loadProxmoxConfig()
+	if err != nil {
+		log.Printf("Configuration error for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to load Proxmox configuration: %v", err),
+		})
+		return
+	}
+
+	// If no proxmox host specified, return empty repsonse
+	if config.Host == "" {
+		log.Printf("No proxmox server configured")
+		c.JSON(http.StatusOK, VirtualMachineResponse{VirtualMachines: []VirtualMachine{}})
+		return
+	}
+
+	// If no nodes specified, return empty response
+	if len(config.Nodes) == 0 {
+		log.Printf("No nodes configured for user %s", username)
+		c.JSON(http.StatusOK, ResourceUsageResponse{Nodes: []NodeResourceUsage{}})
+		return
+	}
+
+	// get req.VMID, req.Node
+	var req VM
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: must include 'vmid' and 'node'"})
+		return
+	}
+
+	// log request on backend
+	log.Printf("User %s requested to power off VM %d on node %s", username, req.VMID, req.Node)
+
+	var error error
+	var response *VMPower
+
+	response, error = powerOffRequest(config, req)
+
+	// If we have error , return error status
+	if error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to fetch resource usage for any nodes",
+			"details": error,
+		})
+		return
+	}
+
+	var finalResponse VMPowerResponse
+	finalResponse.Success = response.Success
+
+	if finalResponse.Success == 1 {
+		log.Printf("Successfully powered down VMID %s for %s", strconv.Itoa(req.VMID), username)
+		c.JSON(http.StatusOK, response)
+	} else {
+		log.Printf("Failed to power down VMID %s for %s", strconv.Itoa(req.VMID), username)
+		c.JSON(http.StatusOK, response)
+	}
+
+}
+
+func powerOffRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
+
+	// Create HTTP client with SSL verification based on config
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// Prepare status URL
+	statusURL := fmt.Sprintf("https://%s:%s/api2/extjs/nodes/%s/qemu/%s/status/shutdown", config.Host, config.Port, vm.Node, strconv.Itoa(vm.VMID))
+
+	// Create request
+	req, err := http.NewRequest("POST", statusURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Add Authorization header with API token
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+
+	// Make request
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to shut down VM: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read VM shutdown response: %v", err)
+	}
+
+	// Parse response
+	var apiResp VMPower
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse VM shutdown response: %v", err)
+	}
+
+	return &apiResp, nil
+}
+
+/*
+ * ====== POWERING ON VIRTUAL MACHINES ======
+ * POST requires "vmid" and "node" fields
+ */
+func PowerOnVirtualMachine(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("username")
+	isAdmin := session.Get("is_admin")
+
+	// Make sure user is admin (redundant with middleware)
+	if !isAdmin.(bool) {
+		log.Printf("Unauthorized access attempt by user %s", username)
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Only admin users can access vm data",
+		})
+		return
+	}
+
+	// store proxmox config
+	var config *ProxmoxConfig
+	var err error
+	config, err = loadProxmoxConfig()
+	if err != nil {
+		log.Printf("Configuration error for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to load Proxmox configuration: %v", err),
+		})
+		return
+	}
+
+	// If no proxmox host specified, return empty repsonse
+	if config.Host == "" {
+		log.Printf("No proxmox server configured")
+		c.JSON(http.StatusOK, VirtualMachineResponse{VirtualMachines: []VirtualMachine{}})
+		return
+	}
+
+	// If no nodes specified, return empty response
+	if len(config.Nodes) == 0 {
+		log.Printf("No nodes configured for user %s", username)
+		c.JSON(http.StatusOK, ResourceUsageResponse{Nodes: []NodeResourceUsage{}})
+		return
+	}
+
+	// get req.VMID, req.Node
+	var req VM
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: must include 'vmid' and 'node'"})
+		return
+	}
+
+	// log request on backend
+	log.Printf("User %s requested to power on VM %d on node %s", username, req.VMID, req.Node)
+
+	var error error
+	var response *VMPower
+
+	response, error = powerOnRequest(config, req)
+
+	// If we have error , return error status
+	if error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to fetch resource usage for any nodes",
+			"details": error,
+		})
+		return
+	}
+
+	var finalResponse VMPowerResponse
+	finalResponse.Success = response.Success
+
+	if finalResponse.Success == 1 {
+		log.Printf("Successfully powered down VMID %s for %s", strconv.Itoa(req.VMID), username)
+		c.JSON(http.StatusOK, response)
+	} else {
+		log.Printf("Failed to power down VMID %s for %s", strconv.Itoa(req.VMID), username)
+		c.JSON(http.StatusOK, response)
+	}
+
+}
+
+func powerOnRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
+
+	// Create HTTP client with SSL verification based on config
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// Prepare status URL
+	statusURL := fmt.Sprintf("https://%s:%s/api2/extjs/nodes/%s/qemu/%s/status/start", config.Host, config.Port, vm.Node, strconv.Itoa(vm.VMID))
+
+	// Create request
+	req, err := http.NewRequest("POST", statusURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Add Authorization header with API token
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+
+	// Make request
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to turn on VM: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read VM power on response: %v", err)
+	}
+
+	// Parse response
+	var apiResp VMPower
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse VM power on response: %v", err)
+	}
+
+	return &apiResp, nil
 }
