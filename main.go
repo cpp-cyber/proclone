@@ -47,6 +47,9 @@ func main() {
 	admin := user.Group("/admin")
 	admin.Use(auth.AdminRequired)
 
+	// Proxmox get VM list endpoint
+	admin.GET("/proxmox/virtualmachines", proxmox.GetVirtualMachines)
+
 	// Proxmox resource monitoring endpoint
 	admin.GET("/proxmox/resources", proxmox.GetProxmoxResources)
 
