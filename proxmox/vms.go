@@ -14,24 +14,27 @@ import (
 )
 
 type VMResponse struct {
-	Data []VirtualMachine `json:"data"`
+	Data []VirtualResource `json:"data"`
 }
-
-type VirtualMachine struct {
-	Type          string `json:"type,omitempty"`
-	Id            string `json:"id,omitempty"`
-	Name          string `json:"name,omitempty"`
-	NodeName      string `json:"node,omitempty"`
-	ResourcePool  string `json:"pool,omitempty"`
-	RunningStatus string `json:"status,omitempty"`
-	Uptime        int    `json:"uptime,omitempty"`
-	VmId          int    `json:"vmid,omitempty"`
+type VirtualResource struct {
+	CPU           float64 `json:"cpu,omitempty"`
+	MaxCPU        int     `json:"maxcpu,omitempty"`
+	Mem           int     `json:"mem,omitempty"`
+	MaxMem        int     `json:"maxmem,omitempty"`
+	Type          string  `json:"type,omitempty"`
+	Id            string  `json:"id,omitempty"`
+	Name          string  `json:"name,omitempty"`
+	NodeName      string  `json:"node,omitempty"`
+	ResourcePool  string  `json:"pool,omitempty"`
+	RunningStatus string  `json:"status,omitempty"`
+	Uptime        int     `json:"uptime,omitempty"`
+	VmId          int     `json:"vmid,omitempty"`
 }
 
 type VirtualMachineResponse struct {
-	VirtualMachines     []VirtualMachine `json:"virtual_machines"`
-	VirtualMachineCount int              `json:"virtual_machine_count"`
-	RunningCount        int              `json:"running_count"`
+	VirtualMachines     []VirtualResource `json:"virtual_machines"`
+	VirtualMachineCount int               `json:"virtual_machine_count"`
+	RunningCount        int               `json:"running_count"`
 }
 
 type VM struct {
@@ -80,12 +83,12 @@ func GetVirtualMachines(c *gin.Context) {
 	// If no proxmox host specified, return empty repsonse
 	if config.Host == "" {
 		log.Printf("No proxmox server configured")
-		c.JSON(http.StatusOK, VirtualMachineResponse{VirtualMachines: []VirtualMachine{}})
+		c.JSON(http.StatusOK, VirtualMachineResponse{VirtualMachines: []VirtualResource{}})
 		return
 	}
 
 	// fetch all virtual machines
-	var virtualMachines *[]VirtualMachine
+	var virtualMachines *[]VirtualResource
 	var error error
 	var response VirtualMachineResponse = VirtualMachineResponse{}
 	response.RunningCount = 0
@@ -119,7 +122,7 @@ func GetVirtualMachines(c *gin.Context) {
 }
 
 // handles fetching all the virtual machines on the proxmox cluster
-func getVirtualMachines(config *ProxmoxConfig) (*[]VirtualMachine, error) {
+func getVirtualResources(config *ProxmoxConfig) (*[]VirtualResource, error) {
 	// Create HTTP client with SSL verification based on config
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
@@ -156,16 +159,29 @@ func getVirtualMachines(config *ProxmoxConfig) (*[]VirtualMachine, error) {
 		return nil, fmt.Errorf("failed to parse status response: %v", err)
 	}
 
+	return &apiResp.Data, nil
+
+}
+
+func getVirtualMachines(config *ProxmoxConfig) (*[]VirtualResource, error) {
+
+	// get all virtual resources from proxmox
+	apiResp, err := getVirtualResources(config)
+
+	// if error, return error
+	if err != nil {
+		return nil, err
+	}
+
 	// Extract virtual machines from response, store in VirtualMachine struct array
-	var vms []VirtualMachine
-	for _, r := range apiResp.Data {
+	var vms []VirtualResource
+	for _, r := range *apiResp {
 		if r.Type == "qemu" {
 			vms = append(vms, r)
 		}
 	}
 
 	return &vms, nil
-
 }
 
 /*
@@ -201,7 +217,7 @@ func PowerOffVirtualMachine(c *gin.Context) {
 	// If no proxmox host specified, return empty repsonse
 	if config.Host == "" {
 		log.Printf("No proxmox server configured")
-		c.JSON(http.StatusOK, VirtualMachineResponse{VirtualMachines: []VirtualMachine{}})
+		c.JSON(http.StatusOK, VirtualMachineResponse{VirtualMachines: []VirtualResource{}})
 		return
 	}
 
@@ -324,7 +340,7 @@ func PowerOnVirtualMachine(c *gin.Context) {
 	// If no proxmox host specified, return empty repsonse
 	if config.Host == "" {
 		log.Printf("No proxmox server configured")
-		c.JSON(http.StatusOK, VirtualMachineResponse{VirtualMachines: []VirtualMachine{}})
+		c.JSON(http.StatusOK, VirtualMachineResponse{VirtualMachines: []VirtualResource{}})
 		return
 	}
 
