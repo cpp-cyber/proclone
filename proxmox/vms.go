@@ -72,12 +72,14 @@ func GetVirtualMachines(c *gin.Context) {
 	var response VirtualMachineResponse = VirtualMachineResponse{}
 	response.RunningCount = 0
 
+	// get virtual machine info and include in response
 	virtualMachines, error = getVirtualMachines(config)
+	response.VirtualMachines = *virtualMachines
 
-	// get total # of virtual machines
+	// get total # of virtual machines and include in response
 	response.VirtualMachineCount = len(*virtualMachines)
 
-	// get # of running virtual machines
+	// get # of running virtual machines and include in response
 	for _, vm := range *virtualMachines {
 		if vm.RunningStatus == "running" {
 			response.RunningCount++
@@ -130,13 +132,13 @@ func getVirtualMachines(config *ProxmoxConfig) (*[]VirtualMachine, error) {
 		return nil, fmt.Errorf("failed to read proxmox resource response: %v", err)
 	}
 
-	// Parse response
+	// Parse response into VMResponse struct
 	var apiResp VMResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to parse status response: %v", err)
 	}
 
-	// Extract status from response
+	// Extract virtual machines from response, store in VirtualMachine struct array
 	var vms []VirtualMachine
 	for _, r := range apiResp.Data {
 		if r.Type == "qemu" {
