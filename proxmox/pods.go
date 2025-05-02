@@ -12,7 +12,11 @@ import (
 )
 
 type TemplateResponse struct {
-	Templates []VirtualResource `json:"templates"`
+	Templates []Template `json:"templates"`
+}
+
+type Template struct {
+	Name string `json:"name"`
 }
 
 /*
@@ -51,14 +55,12 @@ func GetAvailableTemplates(c *gin.Context) {
 		return
 	}
 
-	// fetch all resource pools
-	var virtualResources *[]VirtualResource
+	// fetch template reponse
+	var templateResponse *TemplateResponse
 	var error error
-	var response TemplateResponse = TemplateResponse{}
 
 	// get Template list and assign response
-	virtualResources, error = getTemplateResponse(config)
-	response.Templates = *virtualResources
+	templateResponse, error = getTemplateResponse(config)
 
 	// if error, return error status
 	if error != nil {
@@ -70,10 +72,10 @@ func GetAvailableTemplates(c *gin.Context) {
 	}
 
 	log.Printf("Successfully fetched pod list for user %s", username)
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, templateResponse)
 }
 
-func getTemplateResponse(config *ProxmoxConfig) (*[]VirtualResource, error) {
+func getTemplateResponse(config *ProxmoxConfig) (*TemplateResponse, error) {
 
 	// get all virtual resources from proxmox
 	apiResp, err := getVirtualResources(config)
@@ -83,16 +85,19 @@ func getTemplateResponse(config *ProxmoxConfig) (*[]VirtualResource, error) {
 		return nil, err
 	}
 
-	// Extract virtual machines from response, store in VirtualMachine struct array
-	var templates []VirtualResource
+	// Extract pod templates from response, store in templates array
+	var templateResponse TemplateResponse
 	for _, r := range *apiResp {
 		if r.Type == "pool" {
 			reg, _ := regexp.Compile("kamino_template_.*")
 			if reg.MatchString(r.ResourcePool) {
-				templates = append(templates, r)
+				var temp Template
+				// remove kamino_template_ label when assigning the name to be returned to user
+				temp.Name = r.ResourcePool[16:]
+				templateResponse.Templates = append(templateResponse.Templates, temp)
 			}
 		}
 	}
 
-	return &templates, nil
+	return &templateResponse, nil
 }
