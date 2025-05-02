@@ -144,7 +144,7 @@ func ProfileHandler(c *gin.Context) {
 }
 
 // check if user is authenticated
-func isAuthenticated(c *gin.Context) (bool, string) {
+func IsAuthenticated(c *gin.Context) (bool, string) {
 	session := sessions.Default(c)
 	auth, ok := session.Get("authenticated").(bool)
 	if !ok || !auth {
@@ -163,7 +163,7 @@ func isAdmin(c *gin.Context) bool {
 
 // api endpoint that returns true if user is already authenticated
 func SessionHandler(c *gin.Context) {
-	if ok, username := isAuthenticated(c); ok {
+	if ok, username := IsAuthenticated(c); ok {
 		is_admin := isAdmin(c)
 		c.JSON(http.StatusOK, gin.H{
 			"authenticated": true,
@@ -177,7 +177,7 @@ func SessionHandler(c *gin.Context) {
 
 // auth protected routes helper function
 func AuthRequired(c *gin.Context) {
-	if ok, _ := isAuthenticated(c); !ok {
+	if ok, _ := IsAuthenticated(c); !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		c.Abort()
 		return
