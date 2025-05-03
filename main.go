@@ -46,6 +46,9 @@ func main() {
 	// Proxmox User Template endpoints
 	user.GET("/proxmox/templates", proxmox.GetAvailableTemplates)
 
+	// Proxmox Pod endpoints
+	user.POST("/proxmox/pods/clone", proxmox.CloneTemplateToPod)
+
 	// admin routes
 	admin := user.Group("/admin")
 	admin.Use(auth.AdminRequired)
