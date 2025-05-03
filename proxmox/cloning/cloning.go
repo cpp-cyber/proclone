@@ -1,29 +1,22 @@
-package proxmox
+package cloning
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"math"
 	"net/http"
-	"regexp"
 	"strconv"
 	"time"
 
 	"github.com/P-E-D-L/proclone/auth"
+	"github.com/P-E-D-L/proclone/proxmox"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
-
-type TemplateResponse struct {
-	Templates []Template `json:"templates"`
-}
-
-type Template struct {
-	Name string `json:"name"`
-}
 
 type CloneRequest struct {
 	TemplatePool string `json:"template_pool" binding:"required"`
@@ -34,89 +27,6 @@ type CloneResponse struct {
 	Success bool     `json:"success"`
 	Message string   `json:"message"`
 	Errors  []string `json:"errors,omitempty"`
-}
-
-/*
- * ===== GET ALL CURRENT POD TEMPLATES =====
- */
-func GetAvailableTemplates(c *gin.Context) {
-	session := sessions.Default(c)
-	username := session.Get("username")
-
-	// Make sure user is authenticated (redundant)
-	isAuth, _ := auth.IsAuthenticated(c)
-	if !isAuth {
-		log.Printf("Unauthorized access attempt")
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": "Only authenticated users can access pod data",
-		})
-		return
-	}
-
-	// store proxmox config
-	var config *ProxmoxConfig
-	var err error
-	config, err = loadProxmoxConfig()
-	if err != nil {
-		log.Printf("Configuration error for user %s: %v", username, err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to load Proxmox configuration: %v", err),
-		})
-		return
-	}
-
-	// If no proxmox host specified, return empty repsonse
-	if config.Host == "" {
-		log.Printf("No proxmox server configured")
-		c.JSON(http.StatusOK, VirtualMachineResponse{VirtualMachines: []VirtualResource{}})
-		return
-	}
-
-	// fetch template reponse
-	var templateResponse *TemplateResponse
-	var error error
-
-	// get Template list and assign response
-	templateResponse, error = getTemplateResponse(config)
-
-	// if error, return error status
-	if error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to fetch pod list from proxmox cluster",
-			"details": error,
-		})
-		return
-	}
-
-	log.Printf("Successfully fetched pod list for user %s", username)
-	c.JSON(http.StatusOK, templateResponse)
-}
-
-func getTemplateResponse(config *ProxmoxConfig) (*TemplateResponse, error) {
-
-	// get all virtual resources from proxmox
-	apiResp, err := getVirtualResources(config)
-
-	// if error, return error
-	if err != nil {
-		return nil, err
-	}
-
-	// Extract pod templates from response, store in templates array
-	var templateResponse TemplateResponse
-	for _, r := range *apiResp {
-		if r.Type == "pool" {
-			reg, _ := regexp.Compile("kamino_template_.*")
-			if reg.MatchString(r.ResourcePool) {
-				var temp Template
-				// remove kamino_template_ label when assigning the name to be returned to user
-				temp.Name = r.ResourcePool[16:]
-				templateResponse.Templates = append(templateResponse.Templates, temp)
-			}
-		}
-	}
-
-	return &templateResponse, nil
 }
 
 /*
@@ -140,14 +50,14 @@ func CloneTemplateToPod(c *gin.Context) {
 	var req CloneRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request format",
+			"error":   "Invalid request format",
 			"details": err.Error(),
 		})
 		return
 	}
 
 	// Load Proxmox configuration
-	config, err := loadProxmoxConfig()
+	config, err := proxmox.LoadProxmoxConfig()
 	if err != nil {
 		log.Printf("Configuration error for user %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -157,17 +67,17 @@ func CloneTemplateToPod(c *gin.Context) {
 	}
 
 	// Get all virtual resources
-	apiResp, err := getVirtualResources(config)
+	apiResp, err := proxmox.GetVirtualResources(config)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch virtual resources",
+			"error":   "Failed to fetch virtual resources",
 			"details": err.Error(),
 		})
 		return
 	}
 
 	// Find VMs in template pool
-	var templateVMs []VirtualResource
+	var templateVMs []proxmox.VirtualResource
 	for _, r := range *apiResp {
 		if r.Type == "qemu" && r.ResourcePool == req.TemplatePool {
 			templateVMs = append(templateVMs, r)
@@ -203,7 +113,7 @@ func CloneTemplateToPod(c *gin.Context) {
 	}
 }
 
-func cleanupFailedClone(config *ProxmoxConfig, nodeName string, vmid int) error {
+func cleanupFailedClone(config *proxmox.ProxmoxConfig, nodeName string, vmid int) error {
 	// Create HTTP client with SSL verification based on config
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
@@ -211,7 +121,7 @@ func cleanupFailedClone(config *ProxmoxConfig, nodeName string, vmid int) error 
 	client := &http.Client{Transport: tr}
 
 	// Prepare delete URL
-	deleteURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d", 
+	deleteURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d",
 		config.Host, config.Port, nodeName, vmid)
 
 	// Create request
@@ -238,7 +148,7 @@ func cleanupFailedClone(config *ProxmoxConfig, nodeName string, vmid int) error 
 	return nil
 }
 
-func cloneVM(config *ProxmoxConfig, vm VirtualResource, newPool string) error {
+func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool string) error {
 	// Create a single HTTP client for all requests
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
@@ -277,7 +187,7 @@ func cloneVM(config *ProxmoxConfig, vm VirtualResource, newPool string) error {
 	}
 
 	// Prepare and execute clone request
-	cloneURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/clone", 
+	cloneURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/clone",
 		config.Host, config.Port, vm.NodeName, vm.VmId)
 
 	body := map[string]interface{}{
@@ -310,9 +220,9 @@ func cloneVM(config *ProxmoxConfig, vm VirtualResource, newPool string) error {
 	}
 
 	// Wait for clone completion with exponential backoff
-	statusURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/status/current", 
+	statusURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/status/current",
 		config.Host, config.Port, vm.NodeName, newVMID)
-	
+
 	backoff := time.Second
 	maxBackoff := 30 * time.Second
 	timeout := 5 * time.Minute

@@ -37,8 +37,8 @@ type ProxmoxNodeStatus struct {
 	} `json:"storage"`
 }
 
-// loadProxmoxConfig loads and validates Proxmox configuration from environment variables
-func loadProxmoxConfig() (*ProxmoxConfig, error) {
+// LoadProxmoxConfig loads and validates Proxmox configuration from environment variables
+func LoadProxmoxConfig() (*ProxmoxConfig, error) {
 	tokenID := os.Getenv("PROXMOX_TOKEN_ID")         // The token ID including user and realm
 	tokenSecret := os.Getenv("PROXMOX_TOKEN_SECRET") // The secret part of the token
 
