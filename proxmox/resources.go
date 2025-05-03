@@ -48,7 +48,7 @@ func GetProxmoxResources(c *gin.Context) {
 	}
 
 	// Load Proxmox configuration
-	config, err := loadProxmoxConfig()
+	config, err := LoadProxmoxConfig()
 	if err != nil {
 		log.Printf("Configuration error for user %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{

@@ -6,6 +6,7 @@ import (
 
 	"github.com/P-E-D-L/proclone/auth"
 	"github.com/P-E-D-L/proclone/proxmox"
+	"github.com/P-E-D-L/proclone/proxmox/cloning"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
@@ -44,7 +45,11 @@ func main() {
 	user.POST("/logout", auth.LogoutHandler)
 
 	// Proxmox User Template endpoints
-	user.GET("/proxmox/templates", proxmox.GetAvailableTemplates)
+	user.GET("/proxmox/templates", cloning.GetAvailableTemplates)
+
+	// Proxmox Pod endpoints
+	user.GET("/proxmox/pods", cloning.GetUserPods)
+	user.POST("/proxmox/pods/clone", cloning.CloneTemplateToPod)
 
 	// admin routes
 	admin := user.Group("/admin")
@@ -57,6 +62,9 @@ func main() {
 
 	// Proxmox resource monitoring endpoint
 	admin.GET("/proxmox/resources", proxmox.GetProxmoxResources)
+
+	// Proxmox Admin Pod endpoints
+	admin.GET("/proxmox/pods/all", cloning.GetPods)
 
 	// get port to run server on via. PC_PORT env variable
 	port := os.Getenv("PC_PORT")

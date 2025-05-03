@@ -71,7 +71,7 @@ func GetVirtualMachines(c *gin.Context) {
 	// store proxmox config
 	var config *ProxmoxConfig
 	var err error
-	config, err = loadProxmoxConfig()
+	config, err = LoadProxmoxConfig()
 	if err != nil {
 		log.Printf("Configuration error for user %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -94,7 +94,7 @@ func GetVirtualMachines(c *gin.Context) {
 	response.RunningCount = 0
 
 	// get virtual machine info and include in response
-	virtualMachines, error = getVirtualMachines(config)
+	virtualMachines, error = getVirtualMachineResponse(config)
 	response.VirtualMachines = *virtualMachines
 
 	// get total # of virtual machines and include in response
@@ -122,7 +122,7 @@ func GetVirtualMachines(c *gin.Context) {
 }
 
 // handles fetching all the virtual machines on the proxmox cluster
-func getVirtualResources(config *ProxmoxConfig) (*[]VirtualResource, error) {
+func GetVirtualResources(config *ProxmoxConfig) (*[]VirtualResource, error) {
 	// Create HTTP client with SSL verification based on config
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
@@ -163,10 +163,10 @@ func getVirtualResources(config *ProxmoxConfig) (*[]VirtualResource, error) {
 
 }
 
-func getVirtualMachines(config *ProxmoxConfig) (*[]VirtualResource, error) {
+func getVirtualMachineResponse(config *ProxmoxConfig) (*[]VirtualResource, error) {
 
 	// get all virtual resources from proxmox
-	apiResp, err := getVirtualResources(config)
+	apiResp, err := GetVirtualResources(config)
 
 	// if error, return error
 	if err != nil {
@@ -205,7 +205,7 @@ func PowerOffVirtualMachine(c *gin.Context) {
 	// store proxmox config
 	var config *ProxmoxConfig
 	var err error
-	config, err = loadProxmoxConfig()
+	config, err = LoadProxmoxConfig()
 	if err != nil {
 		log.Printf("Configuration error for user %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -328,7 +328,7 @@ func PowerOnVirtualMachine(c *gin.Context) {
 	// store proxmox config
 	var config *ProxmoxConfig
 	var err error
-	config, err = loadProxmoxConfig()
+	config, err = LoadProxmoxConfig()
 	if err != nil {
 		log.Printf("Configuration error for user %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{

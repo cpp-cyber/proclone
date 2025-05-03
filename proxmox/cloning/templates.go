@@ -1,4 +1,4 @@
-package proxmox
+package cloning
 
 import (
 	"fmt"
@@ -7,6 +7,7 @@ import (
 	"regexp"
 
 	"github.com/P-E-D-L/proclone/auth"
+	"github.com/P-E-D-L/proclone/proxmox"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -31,15 +32,15 @@ func GetAvailableTemplates(c *gin.Context) {
 	if !isAuth {
 		log.Printf("Unauthorized access attempt")
 		c.JSON(http.StatusForbidden, gin.H{
-			"error": "Only authenticated users can access pod data",
+			"error": "Only authenticated users can access template data",
 		})
 		return
 	}
 
 	// store proxmox config
-	var config *ProxmoxConfig
+	var config *proxmox.ProxmoxConfig
 	var err error
-	config, err = loadProxmoxConfig()
+	config, err = proxmox.LoadProxmoxConfig()
 	if err != nil {
 		log.Printf("Configuration error for user %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -51,7 +52,7 @@ func GetAvailableTemplates(c *gin.Context) {
 	// If no proxmox host specified, return empty repsonse
 	if config.Host == "" {
 		log.Printf("No proxmox server configured")
-		c.JSON(http.StatusOK, VirtualMachineResponse{VirtualMachines: []VirtualResource{}})
+		c.JSON(http.StatusOK, proxmox.VirtualMachineResponse{VirtualMachines: []proxmox.VirtualResource{}})
 		return
 	}
 
@@ -65,20 +66,20 @@ func GetAvailableTemplates(c *gin.Context) {
 	// if error, return error status
 	if error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to fetch pod list from proxmox cluster",
+			"error":   "Failed to fetch template list from proxmox cluster",
 			"details": error,
 		})
 		return
 	}
 
-	log.Printf("Successfully fetched pod list for user %s", username)
+	log.Printf("Successfully fetched teamplate list for user %s", username)
 	c.JSON(http.StatusOK, templateResponse)
 }
 
-func getTemplateResponse(config *ProxmoxConfig) (*TemplateResponse, error) {
+func getTemplateResponse(config *proxmox.ProxmoxConfig) (*TemplateResponse, error) {
 
 	// get all virtual resources from proxmox
-	apiResp, err := getVirtualResources(config)
+	apiResp, err := proxmox.GetVirtualResources(config)
 
 	// if error, return error
 	if err != nil {
