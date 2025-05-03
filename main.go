@@ -48,6 +48,7 @@ func main() {
 	user.GET("/proxmox/templates", cloning.GetAvailableTemplates)
 
 	// Proxmox Pod endpoints
+	user.GET("/proxmox/pods", cloning.GetUserPods)
 	user.POST("/proxmox/pods/clone", cloning.CloneTemplateToPod)
 
 	// admin routes

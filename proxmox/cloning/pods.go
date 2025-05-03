@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 
+	"github.com/P-E-D-L/proclone/auth"
 	"github.com/P-E-D-L/proclone/proxmox"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,11 @@ type Pod struct {
 	Name string `json:"name"`
 }
 
+/*
+ * ===== ADMIN ENDPOINT =====
+ * This function returns a list of
+ * all currently deployed pods
+ */
 func GetPods(c *gin.Context) {
 	session := sessions.Default(c)
 	username := session.Get("username")
@@ -68,7 +74,7 @@ func GetPods(c *gin.Context) {
 		return
 	}
 
-	log.Printf("Successfully fetched pod list for user %s", username)
+	log.Printf("Successfully fetched full pod list for user %s", username)
 	c.JSON(http.StatusOK, podResponse)
 }
 
@@ -90,7 +96,92 @@ func getPodResponse(config *proxmox.ProxmoxConfig) (*PodResponse, error) {
 			if reg.MatchString(r.ResourcePool) {
 				var temp Pod
 				// remove kamino_template_ label when assigning the name to be returned to user
-				temp.Name = r.ResourcePool[16:]
+				temp.Name = r.ResourcePool
+				podResponse.Pods = append(podResponse.Pods, temp)
+			}
+		}
+	}
+
+	return &podResponse, nil
+}
+
+/*
+ * ===== USER ENDPOINT =====
+ * This function returns a list of
+ * this user's deployed pods
+ */
+func GetUserPods(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("username")
+
+	// Make sure user is authenticated (redundant)
+	isAuth, _ := auth.IsAuthenticated(c)
+	if !isAuth {
+		log.Printf("Unauthorized access attempt")
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Only authenticated users can see their deployed pods",
+		})
+		return
+	}
+
+	// store proxmox config
+	var config *proxmox.ProxmoxConfig
+	var err error
+	config, err = proxmox.LoadProxmoxConfig()
+	if err != nil {
+		log.Printf("Configuration error for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to load Proxmox configuration: %v", err),
+		})
+		return
+	}
+
+	// If no proxmox host specified, return empty repsonse
+	if config.Host == "" {
+		log.Printf("No proxmox server configured")
+		c.JSON(http.StatusOK, proxmox.VirtualMachineResponse{VirtualMachines: []proxmox.VirtualResource{}})
+		return
+	}
+
+	// fetch template reponse
+	var podResponse *PodResponse
+	var error error
+
+	// get Pod list and assign response
+	podResponse, error = getUserPodResponse(username.(string), config)
+
+	// if error, return error status
+	if error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to fetch user's pod list from proxmox cluster",
+			"details": error,
+		})
+		return
+	}
+
+	log.Printf("Successfully fetched pod list for user %s", username)
+	c.JSON(http.StatusOK, podResponse)
+}
+
+func getUserPodResponse(user string, config *proxmox.ProxmoxConfig) (*PodResponse, error) {
+
+	// get all virtual resources from proxmox
+	apiResp, err := proxmox.GetVirtualResources(config)
+
+	// if error, return error
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract pod templates from response, store in templates array
+	var podResponse PodResponse
+	for _, r := range *apiResp {
+		if r.Type == "pool" {
+			reg, _ := regexp.Compile(fmt.Sprintf("1[0-9][0-9][0-9]_.*_%s", user))
+			if reg.MatchString(r.ResourcePool) {
+				var temp Pod
+				// remove kamino_template_ label when assigning the name to be returned to user
+				temp.Name = r.ResourcePool
 				podResponse.Pods = append(podResponse.Pods, temp)
 			}
 		}
