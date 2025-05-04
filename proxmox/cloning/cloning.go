@@ -29,7 +29,7 @@ type NewPoolResponse struct {
 
 type CloneResponse struct {
 	Success bool     `json:"success"`
-	Message string   `json:"message"`
+	PodName string   `json:"pod_name"`
 	Errors  []string `json:"errors,omitempty"`
 }
 
@@ -128,7 +128,7 @@ func CloneTemplateToPod(c *gin.Context) {
 
 	response := CloneResponse{
 		Success: len(errors) == 0,
-		Message: fmt.Sprintf("Cloned %d VMs from %s to %s", len(templateVMs)-len(errors), templatePool, NewPodPool),
+		PodName: NewPodPool,
 		Errors:  errors,
 	}
 
