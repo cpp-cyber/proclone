@@ -24,7 +24,7 @@ type CloneRequest struct {
 }
 
 type NewPoolResponse struct {
-	Success string `json:"success,omitempty"`
+	Success int `json:"success,omitempty"`
 }
 
 type CloneResponse struct {
