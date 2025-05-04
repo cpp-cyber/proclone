@@ -132,8 +132,13 @@ func DeletePod(c *gin.Context) {
 		errors = append(errors, fmt.Sprintf("Failed to delete pod pool %s: %v", req.PodName, err))
 	}
 
+	var success int = 0
+	if len(errors) == 0 {
+		success = 1
+	}
+
 	response := DeleteResponse{
-		Success: len(errors) == 0,
+		Success: success,
 		PodName: req.PodName,
 		Errors:  errors,
 	}

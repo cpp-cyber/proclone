@@ -28,7 +28,7 @@ type NewPoolResponse struct {
 }
 
 type CloneResponse struct {
-	Success bool     `json:"success"`
+	Success int      `json:"success"`
 	PodName string   `json:"pod_name"`
 	Errors  []string `json:"errors,omitempty"`
 }
@@ -126,8 +126,13 @@ func CloneTemplateToPod(c *gin.Context) {
 		}
 	}
 
+	var success int = 0
+	if len(errors) == 0 {
+		success = 1
+	}
+
 	response := CloneResponse{
-		Success: len(errors) == 0,
+		Success: success,
 		PodName: NewPodPool,
 		Errors:  errors,
 	}
