@@ -284,8 +284,33 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 			if err := json.NewDecoder(resp.Body).Decode(&statusResponse); err != nil {
 				return fmt.Errorf("failed to decode status response: %v", err)
 			}
-			if statusResponse.Data.Status == "running" {
-				return nil // Clone completed successfully
+			if statusResponse.Data.Status == "running" || statusResponse.Data.Status == "stopped" {
+				// Optionally verify the VM is no longer locked
+				lockURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/config",
+					config.Host, config.Port, vm.NodeName, newVMID)
+				lockReq, err := http.NewRequest("GET", lockURL, nil)
+				if err != nil {
+					return fmt.Errorf("failed to create lock check request: %v", err)
+				}
+				lockReq.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+
+				lockResp, err := client.Do(lockReq)
+				if err != nil {
+					return fmt.Errorf("failed to check lock status: %v", err)
+				}
+				defer lockResp.Body.Close()
+
+				var configResp struct {
+					Data struct {
+						Lock string `json:"lock"`
+					} `json:"data"`
+				}
+				if err := json.NewDecoder(lockResp.Body).Decode(&configResp); err != nil {
+					return fmt.Errorf("failed to decode lock status: %v", err)
+				}
+				if configResp.Data.Lock == "" {
+					return nil // Clone is complete and VM is not locked
+				}
 			}
 		}
 
