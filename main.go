@@ -46,10 +46,10 @@ func main() {
 
 	// Proxmox User Template endpoints
 	user.GET("/proxmox/templates", cloning.GetAvailableTemplates)
+	user.POST("/proxmox/templates/clone", cloning.CloneTemplateToPod)
 
 	// Proxmox Pod endpoints
 	user.GET("/proxmox/pods", cloning.GetUserPods)
-	user.POST("/proxmox/pods/clone", cloning.CloneTemplateToPod)
 
 	// admin routes
 	admin := user.Group("/admin")
