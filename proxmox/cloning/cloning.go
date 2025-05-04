@@ -9,6 +9,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -19,8 +20,11 @@ import (
 )
 
 type CloneRequest struct {
-	TemplatePool string `json:"template_pool" binding:"required"`
-	NewPodPool   string `json:"new_pod_pool" binding:"required"`
+	TemplateName string `json:"template_name" binding:"required"`
+}
+
+type NewPoolResponse struct {
+	Success string `json:"success,omitempty"`
 }
 
 type CloneResponse struct {
@@ -56,6 +60,8 @@ func CloneTemplateToPod(c *gin.Context) {
 		return
 	}
 
+	templatePool := "kamino_template_" + req.TemplateName
+
 	// Load Proxmox configuration
 	config, err := proxmox.LoadProxmoxConfig()
 	if err != nil {
@@ -79,14 +85,34 @@ func CloneTemplateToPod(c *gin.Context) {
 	// Find VMs in template pool
 	var templateVMs []proxmox.VirtualResource
 	for _, r := range *apiResp {
-		if r.Type == "qemu" && r.ResourcePool == req.TemplatePool {
+		if r.Type == "qemu" && r.ResourcePool == templatePool {
 			templateVMs = append(templateVMs, r)
 		}
 	}
 
 	if len(templateVMs) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": fmt.Sprintf("No VMs found in template pool: %s", req.TemplatePool),
+			"error": fmt.Sprintf("No VMs found in template pool: %s", templatePool),
+		})
+		return
+	}
+
+	NewPodID, err := nextPodID(config, c)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to get a pod ID",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	NewPodPool, err := createNewPodPool(username.(string), NewPodID, req.TemplateName, config)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to create new pod resource pool",
+			"details": err.Error(),
 		})
 		return
 	}
@@ -94,7 +120,7 @@ func CloneTemplateToPod(c *gin.Context) {
 	// Clone each VM
 	var errors []string
 	for _, vm := range templateVMs {
-		err := cloneVM(config, vm, req.NewPodPool)
+		err := cloneVM(config, vm, NewPodPool)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("Failed to clone VM %s: %v", vm.Name, err))
 		}
@@ -102,7 +128,7 @@ func CloneTemplateToPod(c *gin.Context) {
 
 	response := CloneResponse{
 		Success: len(errors) == 0,
-		Message: fmt.Sprintf("Cloned %d VMs from %s to %s", len(templateVMs)-len(errors), req.TemplatePool, req.NewPodPool),
+		Message: fmt.Sprintf("Cloned %d VMs from %s to %s", len(templateVMs)-len(errors), templatePool, NewPodPool),
 		Errors:  errors,
 	}
 
@@ -266,4 +292,95 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 		time.Sleep(backoff)
 		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
 	}
+}
+
+// finds lowest available POD ID between 1001 - 1255
+func nextPodID(config *proxmox.ProxmoxConfig, c *gin.Context) (string, error) {
+	podResponse, err := getPodResponse(config)
+
+	// if error, return error status
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to fetch pod list from proxmox cluster",
+			"details": err,
+		})
+		return "", err
+	}
+
+	pods := podResponse.Pods
+	var ids []int
+
+	// for each pod name, get id from name and append to int array
+	for _, pod := range pods {
+		id, _ := strconv.Atoi(pod.Name[:4])
+		ids = append(ids, id)
+	}
+
+	sort.Ints(ids)
+
+	var nextId int
+
+	// find first id available starting from 1001
+	for i := 1001; i <= 1256; i++ {
+		nextId = i
+		if ids[i-1001] != i {
+			break
+		}
+	}
+
+	// if no ids available between 0 - 255 return error
+	if nextId == 1256 {
+		err = fmt.Errorf("no pod ids available")
+		return "", err
+	}
+
+	return strconv.Itoa(nextId), nil
+}
+
+func createNewPodPool(username string, newPodID string, templateName string, config *proxmox.ProxmoxConfig) (string, error) {
+	newPoolName := newPodID + "_" + templateName + "_" + username
+
+	// Create HTTP client with SSL verification based on config
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// define proxmox pools endpoint URL
+	poolURL := fmt.Sprintf("https://%s:%s/api2/extjs/pools", config.Host, config.Port)
+
+	// define json data holding new pool name
+	jsonString := fmt.Sprintf("{\"poolid\":\"%s\"}", newPoolName)
+	jsonData := []byte(jsonString)
+
+	// Create request
+	req, err := http.NewRequest("POST", poolURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	// Make request
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to create new pool: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read VM shutdown response: %v", err)
+	}
+
+	// Parse response
+	var newPoolResponse NewPoolResponse
+	if err := json.Unmarshal(body, &newPoolResponse); err != nil {
+		return "", fmt.Errorf("failed to parse new pool response: %v", err)
+	}
+
+	return newPoolName, nil
 }
