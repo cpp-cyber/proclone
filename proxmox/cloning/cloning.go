@@ -319,13 +319,19 @@ func nextPodID(config *proxmox.ProxmoxConfig, c *gin.Context) (string, error) {
 	sort.Ints(ids)
 
 	var nextId int
+	var gapFound bool = false
 
 	// find first id available starting from 1001
-	for i := 1001; i <= 1256; i++ {
+	for i := 1001; i <= 1000+len(ids); i++ {
 		nextId = i
 		if ids[i-1001] != i {
+			gapFound = true
 			break
 		}
+	}
+
+	if !gapFound {
+		nextId = 1001 + len(ids)
 	}
 
 	// if no ids available between 0 - 255 return error
