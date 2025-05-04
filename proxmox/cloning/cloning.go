@@ -133,6 +133,20 @@ func CloneTemplateToPod(c *gin.Context) {
 	}
 
 	if len(errors) > 0 {
+		// if an error has occured, count # of successfully cloned VMs
+		var clonedVMs []proxmox.VirtualResource
+		for _, r := range *apiResp {
+			if r.Type == "qemu" && r.ResourcePool == NewPodPool {
+				clonedVMs = append(templateVMs, r)
+			}
+		}
+
+		// if there are no cloned VMs in the resource pool, clean up the resource pool
+		if len(clonedVMs) == 0 {
+			cleanupFailedPodPool(config, NewPodPool)
+		}
+
+		// send response :)
 		c.JSON(http.StatusPartialContent, response)
 	} else {
 		c.JSON(http.StatusOK, response)
@@ -275,7 +289,7 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 		defer resp.Body.Close()
 
 		if resp.StatusCode == http.StatusOK {
-			// Verify the VM is actually running/ready
+			// Verify the VM is actually cloned
 			var statusResponse struct {
 				Data struct {
 					Status string `json:"status"`
@@ -285,7 +299,6 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 				return fmt.Errorf("failed to decode status response: %v", err)
 			}
 			if statusResponse.Data.Status == "running" || statusResponse.Data.Status == "stopped" {
-				// Optionally verify the VM is no longer locked
 				lockURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/config",
 					config.Host, config.Port, vm.NodeName, newVMID)
 				lockReq, err := http.NewRequest("GET", lockURL, nil)
@@ -366,6 +379,47 @@ func nextPodID(config *proxmox.ProxmoxConfig, c *gin.Context) (string, error) {
 	}
 
 	return strconv.Itoa(nextId), nil
+}
+
+func cleanupFailedPodPool(config *proxmox.ProxmoxConfig, poolName string) error {
+	// Create HTTP client with SSL verification based on config
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// Prepare delete URL
+	// define proxmox pools endpoint URL
+	poolDeleteURL := fmt.Sprintf("https://%s:%s/api2/extjs/pools", config.Host, config.Port)
+
+	// define json data holding new pool name
+	jsonString := fmt.Sprintf("{\"poolid\":\"%s\"}", poolName)
+	jsonData := []byte(jsonString)
+
+	// Create request
+	req, err := http.NewRequest("DELETE", poolDeleteURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create pool cleanup request: %v", err)
+	}
+
+	// Add headers
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	// Make request
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to cleanup pool: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to cleanup pool: %s", string(body))
+	}
+
+	return nil
 }
 
 func createNewPodPool(username string, newPodID string, templateName string, config *proxmox.ProxmoxConfig) (string, error) {
