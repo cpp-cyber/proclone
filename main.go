@@ -47,6 +47,7 @@ func main() {
 	// Proxmox User Template endpoints
 	user.GET("/proxmox/templates", cloning.GetAvailableTemplates)
 	user.POST("/proxmox/templates/clone", cloning.CloneTemplateToPod)
+	user.POST("/proxmox/pods/delete", cloning.DeletePod)
 
 	// Proxmox Pod endpoints
 	user.GET("/proxmox/pods", cloning.GetUserPods)
