@@ -1,9 +1,14 @@
 package cloning
 
 import (
+	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"net/http"
+	"time"
 
 	"github.com/P-E-D-L/proclone/auth"
 	"github.com/P-E-D-L/proclone/proxmox"
@@ -94,33 +99,40 @@ func DeletePod(c *gin.Context) {
 
 	if !poolExists {
 		log.Printf("User %s attempted to delete pod %s, but the resource pool doesn't exist.", username, req.PodName)
-		c.JSON(http.StatusForbidden, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Resource pool does not exist",
 		})
 		return
 	}
 
 	// Find all vms in resource pool
-	var podVMs []proxmox.VirtualResource
-	for _, r := range *apiResp {
-		if r.Type == "qemu" && r.ResourcePool == req.PodName {
-			podVMs = append(podVMs, r)
-		}
+	podVMs, err := getPoolMembers(config, req.PodName)
+
+	if err != nil {
+		log.Printf("attempted to enumerate pod %s members, but the resource pool doesn't exist.", req.PodName)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Resource pool does not exist",
+		})
+		return
 	}
 
 	var errors []string
 
-	// if no vms in pool take note, otherwise delete them all
-	if len(podVMs) == 0 {
-		log.Printf("No VMs found in pod pool: %s", req.PodName)
-	} else {
-		for _, vm := range podVMs {
-			// should probably change this function name to just "cleanupClone" at this point
-			err := cleanupFailedClone(config, vm.NodeName, vm.VmId)
-			if err != nil {
-				errors = append(errors, fmt.Sprintf("Failed to delete VM %s: %v", vm.Name, err))
-			}
+	// for each vm in the pool
+	for _, vm := range podVMs {
+		// should probably change this function name to just "cleanupClone" at this point
+		err := cleanupFailedClone(config, vm.NodeName, vm.VmId)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("Failed to delete VM %s: %v", vm.Name, err))
 		}
+	}
+
+	// wait until all vms have been deleted
+	err = waitForEmptyPool(config, req.PodName)
+
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("waiting for empty pool returned error: %v", err))
+		log.Printf("attempted to enumerate pod %s members, but the resource pool doesn't exist.", req.PodName)
 	}
 
 	// delete resource pool
@@ -146,4 +158,74 @@ func DeletePod(c *gin.Context) {
 	} else {
 		c.JSON(http.StatusOK, response)
 	}
+}
+
+func waitForEmptyPool(config *proxmox.ProxmoxConfig, poolid string) error {
+	backoff := time.Second
+	maxBackoff := 30 * time.Second
+	timeout := 5 * time.Minute
+	startTime := time.Now()
+
+	for {
+		if time.Since(startTime) > timeout {
+			return fmt.Errorf("failed to delete all resource pool members: timeout")
+		} else {
+			poolMembers, err := getPoolMembers(config, poolid)
+
+			if err != nil {
+				return fmt.Errorf("failed to get resource pool members: %v", err)
+			}
+
+			if len(poolMembers) == 0 {
+				log.Printf("%s contains no members, proceeding with pool deletion.", poolid)
+				return nil
+			}
+			time.Sleep(backoff)
+			backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
+		}
+	}
+}
+
+func getPoolMembers(config *proxmox.ProxmoxConfig, poolid string) ([]proxmox.VirtualResource, error) {
+	// Create HTTP client with SSL verification based on config
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// Prepare proxmox pool get URL
+	poolGetURL := fmt.Sprintf("https://%s:%s/api2/json/pools/%s", config.Host, config.Port, poolid)
+
+	// Create request
+	req, err := http.NewRequest("GET", poolGetURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pool get request: %v", err)
+	}
+
+	// Add headers
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	// Make request
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resource pool data: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read resource pool response: %v", err)
+	}
+
+	// Parse response into VMResponse struct
+	var apiResp proxmox.VMResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse status response: %v", err)
+	}
+
+	// return array of resource pool members
+	return apiResp.Data, nil
 }
