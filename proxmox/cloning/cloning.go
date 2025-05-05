@@ -395,14 +395,10 @@ func cleanupFailedPodPool(config *proxmox.ProxmoxConfig, poolName string) error 
 
 	// Prepare delete URL
 	// define proxmox pools endpoint URL
-	poolDeleteURL := fmt.Sprintf("https://%s:%s/api2/extjs/pools", config.Host, config.Port)
-
-	// define json data holding new pool name
-	jsonString := fmt.Sprintf("{\"poolid\":\"%s\"}", poolName)
-	jsonData := []byte(jsonString)
+	poolDeleteURL := fmt.Sprintf("https://%s:%s/api2/json/pools/%s", config.Host, config.Port, poolName)
 
 	// Create request
-	req, err := http.NewRequest("DELETE", poolDeleteURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("DELETE", poolDeleteURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create pool cleanup request: %v", err)
 	}
