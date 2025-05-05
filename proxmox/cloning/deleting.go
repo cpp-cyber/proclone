@@ -112,9 +112,7 @@ func DeletePod(c *gin.Context) {
 
 	// if no vms in pool take note, otherwise delete them all
 	if len(podVMs) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": fmt.Sprintf("No VMs found in pod pool: %s", req.PodName),
-		})
+		log.Printf("No VMs found in pod pool: %s", req.PodName)
 	} else {
 		for _, vm := range podVMs {
 			// should probably change this function name to just "cleanupClone" at this point
