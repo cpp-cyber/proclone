@@ -95,23 +95,23 @@ func GetProxmoxResources(c *gin.Context) {
 			CPUUsage:     status.CPU,
 			MemoryTotal:  status.Memory.Total,
 			MemoryUsed:   status.Memory.Used,
-			StorageTotal: int64(usedStorage),
-			StorageUsed:  int64(totalStorage),
+			StorageTotal: int64(totalStorage),
+			StorageUsed:  int64(usedStorage),
 		})
 
 		// Add to cluster totals
 		response.Cluster.TotalMemoryTotal += status.Memory.Total
 		response.Cluster.TotalMemoryUsed += status.Memory.Used
-		response.Cluster.TotalStorageTotal += int64(usedStorage)
-		response.Cluster.TotalStorageUsed += int64(totalStorage)
+		response.Cluster.TotalStorageTotal += int64(totalStorage)
+		response.Cluster.TotalStorageUsed += int64(usedStorage)
 		response.Cluster.TotalCPUUsage += status.CPU
 	}
 
 	// Get NAS storage and add that to cluster capacity
 	usedStorage, totalStorage := getStorage(VirtualResources, "mufasa-proxmox")
 
-	response.Cluster.TotalStorageTotal += int64(usedStorage)
-	response.Cluster.TotalStorageUsed += int64(totalStorage)
+	response.Cluster.TotalStorageTotal += int64(totalStorage)
+	response.Cluster.TotalStorageUsed += int64(usedStorage)
 
 	// Calculate average CPU usage for the cluster
 	if len(nodes) > 0 {
