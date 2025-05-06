@@ -239,7 +239,6 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 		"newid": newVMID,
 		"name":  fmt.Sprintf("%s-clone", vm.Name),
 		"pool":  newPool,
-		"full":  1,
 	}
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
