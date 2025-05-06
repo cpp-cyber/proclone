@@ -109,9 +109,10 @@ func DeletePod(c *gin.Context) {
 	podVMs, err := getPoolMembers(config, req.PodName)
 
 	if err != nil {
-		log.Printf("attempted to enumerate pod %s members, but the resource pool doesn't exist.", req.PodName)
+		log.Printf("attempted to enumerate pod %s members, but error: %v", req.PodName, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Resource pool does not exist",
+			"error":   "Resource pool does not exist",
+			"details": err.Error(),
 		})
 		return
 	}
