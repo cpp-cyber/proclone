@@ -70,6 +70,7 @@ func GetProxmoxResources(c *gin.Context) {
 	response := ResourceUsageResponse{}
 
 	VirtualResources, err := GetVirtualResources(config)
+
 	if err != nil {
 		log.Printf("Failed to get proxmox cluster resources: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -147,11 +148,11 @@ func getNodeStorage(resources *[]VirtualResource, node string) (Used int, Total 
 		if r.Type == "storage" && r.NodeName == node &&
 			(r.Storage == "local" || r.Storage == "local-lvm") &&
 			r.RunningStatus == "available" {
-
 			used += r.Disk
 			total += r.MaxDisk
 		}
 	}
+	log.Printf("%s has used %d of its %d local storage", node, used, total)
 	return used, total
 }
 
@@ -165,5 +166,6 @@ func getStorage(resources *[]VirtualResource, storage string) (Used int, Total i
 			break
 		}
 	}
+	log.Printf("The cluster has used %d of its %d total storage", used, total)
 	return used, total
 }
