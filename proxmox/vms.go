@@ -29,6 +29,10 @@ type VirtualResource struct {
 	RunningStatus string  `json:"status,omitempty"`
 	Uptime        int     `json:"uptime,omitempty"`
 	VmId          int     `json:"vmid,omitempty"`
+	Storage       string  `json:"storage,omitempty"`
+	Disk          int     `json:"disk,omitempty"`
+	MaxDisk       int     `json:"maxdisk,omitempty"`
+	Status        string  `json:"status"`
 }
 
 type VirtualMachineResponse struct {

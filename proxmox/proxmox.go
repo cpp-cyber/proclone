@@ -31,10 +31,6 @@ type ProxmoxNodeStatus struct {
 		Total int64 `json:"total"`
 		Used  int64 `json:"used"`
 	} `json:"memory"`
-	Storage struct {
-		Total int64 `json:"total"`
-		Used  int64 `json:"used"`
-	} `json:"storage"`
 }
 
 // LoadProxmoxConfig loads and validates Proxmox configuration from environment variables
