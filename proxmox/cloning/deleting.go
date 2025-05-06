@@ -16,6 +16,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type PoolResponse struct {
+	Data PoolMembers `json:"data"`
+}
+
+type PoolMembers struct {
+	Members []proxmox.VirtualResource `json:"members"`
+}
+
 type DeleteRequest struct {
 	PodName string `json:"pod_id"` // full pod name i.e. 1015_Some_Template_Administrator
 }
@@ -222,11 +230,11 @@ func getPoolMembers(config *proxmox.ProxmoxConfig, poolid string) ([]proxmox.Vir
 	}
 
 	// Parse response into VMResponse struct
-	var apiResp proxmox.VMResponse
+	var apiResp PoolResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to parse status response: %v", err)
 	}
 
 	// return array of resource pool members
-	return apiResp.Data, nil
+	return apiResp.Data.Members, nil
 }
