@@ -69,6 +69,15 @@ func GetProxmoxResources(c *gin.Context) {
 	var errors []string
 	response := ResourceUsageResponse{}
 
+	VirtualResources, err := GetVirtualResources(config)
+	if err != nil {
+		log.Printf("Failed to get proxmox cluster resources: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to get proxmox cluster resources: %v", err),
+		})
+		return
+	}
+
 	for _, nodeName := range config.Nodes {
 		status, err := getNodeStatus(config, nodeName)
 		if err != nil {
@@ -78,22 +87,30 @@ func GetProxmoxResources(c *gin.Context) {
 			continue
 		}
 
+		usedStorage, totalStorage := getNodeStorage(VirtualResources, nodeName)
+
 		nodes = append(nodes, NodeResourceUsage{
 			NodeName:     nodeName,
 			CPUUsage:     status.CPU,
 			MemoryTotal:  status.Memory.Total,
 			MemoryUsed:   status.Memory.Used,
-			StorageTotal: status.Storage.Total,
-			StorageUsed:  status.Storage.Used,
+			StorageTotal: int64(usedStorage),
+			StorageUsed:  int64(totalStorage),
 		})
 
 		// Add to cluster totals
 		response.Cluster.TotalMemoryTotal += status.Memory.Total
 		response.Cluster.TotalMemoryUsed += status.Memory.Used
-		response.Cluster.TotalStorageTotal += status.Storage.Total
-		response.Cluster.TotalStorageUsed += status.Storage.Used
+		response.Cluster.TotalStorageTotal += int64(usedStorage)
+		response.Cluster.TotalStorageUsed += int64(totalStorage)
 		response.Cluster.TotalCPUUsage += status.CPU
 	}
+
+	// Get NAS storage and add that to cluster capacity
+	usedStorage, totalStorage := getStorage(VirtualResources, "mufasa-proxmox")
+
+	response.Cluster.TotalStorageTotal += int64(usedStorage)
+	response.Cluster.TotalStorageUsed += int64(totalStorage)
 
 	// Calculate average CPU usage for the cluster
 	if len(nodes) > 0 {
@@ -121,4 +138,32 @@ func GetProxmoxResources(c *gin.Context) {
 	// Success case
 	log.Printf("Successfully fetched resource usage for user %s", username)
 	c.JSON(http.StatusOK, response)
+}
+
+func getNodeStorage(resources *[]VirtualResource, node string) (Used int, Total int) {
+	used, total := 0, 0
+
+	for _, r := range *resources {
+		if r.Type == "storage" && r.NodeName == node &&
+			(r.Storage == "local" || r.Storage == "local-lvm") &&
+			r.RunningStatus == "available" {
+
+			used += r.Disk
+			total += r.MaxDisk
+		}
+	}
+	return used, total
+}
+
+func getStorage(resources *[]VirtualResource, storage string) (Used int, Total int) {
+	used, total := 0, 0
+
+	for _, r := range *resources {
+		if r.Type == "storage" && r.Storage == storage && r.RunningStatus == "available" {
+			used = r.Disk
+			total = r.MaxDisk
+			break
+		}
+	}
+	return used, total
 }
