@@ -141,8 +141,9 @@ func GetProxmoxResources(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-func getNodeStorage(resources *[]VirtualResource, node string) (Used int, Total int) {
-	used, total := 0, 0
+func getNodeStorage(resources *[]VirtualResource, node string) (Used int64, Total int64) {
+	var used int64 = 0
+	var total int64 = 0
 
 	for _, r := range *resources {
 		if r.Type == "storage" && r.NodeName == node &&
@@ -156,8 +157,9 @@ func getNodeStorage(resources *[]VirtualResource, node string) (Used int, Total 
 	return used, total
 }
 
-func getStorage(resources *[]VirtualResource, storage string) (Used int, Total int) {
-	used, total := 0, 0
+func getStorage(resources *[]VirtualResource, storage string) (Used int64, Total int64) {
+	var used int64 = 0
+	var total int64 = 0
 
 	for _, r := range *resources {
 		if r.Type == "storage" && r.Storage == storage && r.RunningStatus == "available" {
