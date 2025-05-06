@@ -176,7 +176,7 @@ func setPoolPermission(config *proxmox.ProxmoxConfig, pool string, user string) 
 	accessURL := fmt.Sprintf("https://%s:%s/api2/json/access/acl", config.Host, config.Port)
 
 	// define json data holding new pool name
-	jsonString := fmt.Sprintf("{\"path\":\"/pool/%s\", \"users\":\"%s@SDC\", \"roles\":\"PVEVMUser\", \"propagate\": true }", pool, user)
+	jsonString := fmt.Sprintf("{\"path\":\"/pool/%s\", \"users\":\"%s@SDC\", \"roles\":\"PVEVMUser,PVEPoolUser\", \"propagate\": true }", pool, user)
 	jsonData := []byte(jsonString)
 
 	// Create request
