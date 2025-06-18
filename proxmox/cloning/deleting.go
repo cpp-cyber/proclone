@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/P-E-D-L/proclone/auth"
@@ -68,7 +69,7 @@ func DeletePod(c *gin.Context) {
 			})
 			return
 		}
-		if username.(string) != req.PodName[len(username.(string)):] {
+		if !strings.HasSuffix(req.PodName, username.(string)) {
 			log.Printf("User %s attempted to delete pod %s.", username, req.PodName)
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": "Only admin users can administer other users' pods",

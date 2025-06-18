@@ -126,6 +126,11 @@ func CloneTemplateToPod(c *gin.Context) {
 		}
 	}
 
+	err = setPoolPermission(config, NewPodPool, username.(string))
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Failed to update pool permissions for %s: %v", username, err))
+	}
+
 	var success int = 0
 	if len(errors) == 0 {
 		success = 1
@@ -156,6 +161,42 @@ func CloneTemplateToPod(c *gin.Context) {
 	} else {
 		c.JSON(http.StatusOK, response)
 	}
+}
+
+// assign a user to be a VM user for a resource pool
+func setPoolPermission(config *proxmox.ProxmoxConfig, pool string, user string) error {
+
+	// Create HTTP client with SSL verification based on config
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// define proxmox pools endpoint URL
+	accessURL := fmt.Sprintf("https://%s:%s/api2/json/access/acl", config.Host, config.Port)
+
+	// define json data holding new pool name
+	jsonString := fmt.Sprintf("{\"path\":\"/pool/%s\", \"users\":\"%s@SDC\", \"roles\":\"PVEVMUser,PVEPoolUser\", \"propagate\": true }", pool, user)
+	jsonData := []byte(jsonString)
+
+	// Create request
+	req, err := http.NewRequest("PUT", accessURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	// Make request
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to assign pool permissions for %s: %v", user, err)
+	}
+	defer resp.Body.Close()
+
+	return nil
 }
 
 func cleanupFailedClone(config *proxmox.ProxmoxConfig, nodeName string, vmid int) error {
