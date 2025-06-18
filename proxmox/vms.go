@@ -98,6 +98,16 @@ func GetVirtualMachines(c *gin.Context) {
 
 	// get virtual machine info and include in response
 	virtualMachines, error = getVirtualMachineResponse(config)
+
+	// if error, return error status
+	if error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to fetch vm list from proxmox cluster",
+			"details": error,
+		})
+		return
+	}
+
 	response.VirtualMachines = *virtualMachines
 
 	// get total # of virtual machines and include in response
@@ -108,15 +118,6 @@ func GetVirtualMachines(c *gin.Context) {
 		if vm.RunningStatus == "running" {
 			response.RunningCount++
 		}
-	}
-
-	// if error, return error status
-	if error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to fetch vm list from proxmox cluster",
-			"details": error,
-		})
-		return
 	}
 
 	log.Printf("Successfully fetched vm list for user %s", username)
