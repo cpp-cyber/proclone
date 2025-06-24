@@ -368,7 +368,7 @@ func PowerOnVirtualMachine(c *gin.Context) {
 	var error error
 	var response *VMPower
 
-	response, error = powerOnRequest(config, req)
+	response, error = PowerOnRequest(config, req)
 
 	// If we have error , return error status
 	if error != nil {
@@ -392,7 +392,7 @@ func PowerOnVirtualMachine(c *gin.Context) {
 
 }
 
-func powerOnRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
+func PowerOnRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 
 	// Create HTTP client with SSL verification based on config
 	tr := &http.Transport{

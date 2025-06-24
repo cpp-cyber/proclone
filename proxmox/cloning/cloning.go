@@ -19,6 +19,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const KAMINO_TEMP_POOL string = "0100_Kamino_Templates"
+const ROUTER_NAME string = "1-1NAT-pfsense"
+
 type CloneRequest struct {
 	TemplateName string `json:"template_name" binding:"required"`
 }
@@ -39,6 +42,7 @@ type CloneResponse struct {
 func CloneTemplateToPod(c *gin.Context) {
 	session := sessions.Default(c)
 	username := session.Get("username")
+	var errors []string
 
 	// Make sure user is authenticated
 	isAuth, _ := auth.IsAuthenticated(c)
@@ -84,12 +88,21 @@ func CloneTemplateToPod(c *gin.Context) {
 
 	// Find VMs in template pool
 	var templateVMs []proxmox.VirtualResource
+	var routerTemplate proxmox.VirtualResource
 	for _, r := range *apiResp {
+
+		// if VM is a member of target pool, add it to list
 		if r.Type == "qemu" && r.ResourcePool == templatePool {
 			templateVMs = append(templateVMs, r)
 		}
+
+		// if vm is pod router template, save that to variable
+		if r.Name == ROUTER_NAME && r.ResourcePool == KAMINO_TEMP_POOL {
+			routerTemplate = r
+		}
 	}
 
+	// handle case where template is empty and should not be cloned
 	if len(templateVMs) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": fmt.Sprintf("No VMs found in template pool: %s", templatePool),
@@ -97,6 +110,7 @@ func CloneTemplateToPod(c *gin.Context) {
 		return
 	}
 
+	// get next avaialble pod ID
 	NewPodID, err := nextPodID(config, c)
 
 	if err != nil {
@@ -107,6 +121,7 @@ func CloneTemplateToPod(c *gin.Context) {
 		return
 	}
 
+	// create new pod resource pool with ID
 	NewPodPool, err := createNewPodPool(username.(string), NewPodID, req.TemplateName, config)
 
 	if err != nil {
@@ -117,15 +132,46 @@ func CloneTemplateToPod(c *gin.Context) {
 		return
 	}
 
-	// Clone each VM
-	var errors []string
+	/* Clone 1:1 NAT router from template
+	 *
+	 */
+	newRouter, err := cloneVM(config, routerTemplate, NewPodPool)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Failed to clone router VM: %v", err))
+	}
+
+	// Turn on router
+	_, err = proxmox.PowerOnRequest(config, *newRouter)
+
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Failed to start router VM: %v", err))
+	}
+
+	// Wait for router to be running
+	err = waitForRunning(config, *newRouter)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Failed to start router VM: %v", err))
+	} else {
+		// Configure router
+	}
+
+	// Clone each VM to new pool
 	for _, vm := range templateVMs {
-		err := cloneVM(config, vm, NewPodPool)
+		_, err := cloneVM(config, vm, NewPodPool)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("Failed to clone VM %s: %v", vm.Name, err))
 		}
 	}
 
+	/* Create & Configure VNet
+	 *
+	 */
+
+	/* Configure VNet of all VMs
+	 *
+	 */
+
+	// automatically give user who cloned the pod access
 	err = setPoolPermission(config, NewPodPool, username.(string))
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("Failed to update pool permissions for %s: %v", username, err))
@@ -234,7 +280,7 @@ func cleanupFailedClone(config *proxmox.ProxmoxConfig, nodeName string, vmid int
 	return nil
 }
 
-func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool string) error {
+func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool string) (newVm *proxmox.VM, err error) {
 	// Create a single HTTP client for all requests
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
@@ -245,31 +291,32 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 	nextIDURL := fmt.Sprintf("https://%s:%s/api2/json/cluster/nextid", config.Host, config.Port)
 	req, err := http.NewRequest("GET", nextIDURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create VMID request: %v", err)
+		return nil, fmt.Errorf("failed to create VMID request: %v", err)
 	}
 	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to get next VMID: %v", err)
+		return nil, fmt.Errorf("failed to get next VMID: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to get next VMID: %s", string(body))
+		return nil, fmt.Errorf("failed to get next VMID: %s", string(body))
 	}
 
 	var nextIDResponse struct {
 		Data string `json:"data"`
 	}
+
 	if err := json.NewDecoder(resp.Body).Decode(&nextIDResponse); err != nil {
-		return fmt.Errorf("failed to decode VMID response: %v", err)
+		return nil, fmt.Errorf("failed to decode VMID response: %v", err)
 	}
 
 	newVMID, err := strconv.Atoi(nextIDResponse.Data)
 	if err != nil {
-		return fmt.Errorf("invalid VMID received: %v", err)
+		return nil, fmt.Errorf("invalid VMID received: %v", err)
 	}
 
 	// Prepare and execute clone request
@@ -283,25 +330,25 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 	}
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("failed to create request body: %v", err)
+		return nil, fmt.Errorf("failed to create request body: %v", err)
 	}
 
 	req, err = http.NewRequest("POST", cloneURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
-		return fmt.Errorf("failed to create clone request: %v", err)
+		return nil, fmt.Errorf("failed to create clone request: %v", err)
 	}
 	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err = client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to clone VM: %v", err)
+		return nil, fmt.Errorf("failed to clone VM: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to clone VM: %s", string(body))
+		return nil, fmt.Errorf("failed to clone VM: %s", string(body))
 	}
 
 	// Wait for clone completion with exponential backoff
@@ -316,20 +363,20 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 	for {
 		if time.Since(startTime) > timeout {
 			if err := cleanupFailedClone(config, vm.NodeName, newVMID); err != nil {
-				return fmt.Errorf("clone timed out and cleanup failed: %v", err)
+				return nil, fmt.Errorf("clone timed out and cleanup failed: %v", err)
 			}
-			return fmt.Errorf("clone operation timed out after %v", timeout)
+			return nil, fmt.Errorf("clone operation timed out after %v", timeout)
 		}
 
 		req, err = http.NewRequest("GET", statusURL, nil)
 		if err != nil {
-			return fmt.Errorf("failed to create status check request: %v", err)
+			return nil, fmt.Errorf("failed to create status check request: %v", err)
 		}
 		req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
 
 		resp, err = client.Do(req)
 		if err != nil {
-			return fmt.Errorf("failed to check clone status: %v", err)
+			return nil, fmt.Errorf("failed to check clone status: %v", err)
 		}
 		defer resp.Body.Close()
 
@@ -341,20 +388,20 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 				} `json:"data"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&statusResponse); err != nil {
-				return fmt.Errorf("failed to decode status response: %v", err)
+				return nil, fmt.Errorf("failed to decode status response: %v", err)
 			}
 			if statusResponse.Data.Status == "running" || statusResponse.Data.Status == "stopped" {
 				lockURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/config",
 					config.Host, config.Port, vm.NodeName, newVMID)
 				lockReq, err := http.NewRequest("GET", lockURL, nil)
 				if err != nil {
-					return fmt.Errorf("failed to create lock check request: %v", err)
+					return nil, fmt.Errorf("failed to create lock check request: %v", err)
 				}
 				lockReq.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
 
 				lockResp, err := client.Do(lockReq)
 				if err != nil {
-					return fmt.Errorf("failed to check lock status: %v", err)
+					return nil, fmt.Errorf("failed to check lock status: %v", err)
 				}
 				defer lockResp.Body.Close()
 
@@ -364,10 +411,16 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 					} `json:"data"`
 				}
 				if err := json.NewDecoder(lockResp.Body).Decode(&configResp); err != nil {
-					return fmt.Errorf("failed to decode lock status: %v", err)
+					return nil, fmt.Errorf("failed to decode lock status: %v", err)
 				}
 				if configResp.Data.Lock == "" {
-					return nil // Clone is complete and VM is not locked
+					var newVM proxmox.VM
+					newVM.VMID = newVMID
+
+					// once node optimization is done must be replaced with new node !!!
+					newVM.Node = vm.NodeName
+
+					return &newVM, nil // Clone is complete and VM is not locked
 				}
 			}
 		}
@@ -509,4 +562,58 @@ func createNewPodPool(username string, newPodID string, templateName string, con
 	}
 
 	return newPoolName, nil
+}
+
+// called by CloneTemplateToPod to wait for router to finish starting
+func waitForRunning(config *proxmox.ProxmoxConfig, vm proxmox.VM) error {
+	// Create a single HTTP client for all requests
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// Wait for clone completion with exponential backoff
+	statusURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/status/current",
+		config.Host, config.Port, vm.Node, vm.VMID)
+
+	backoff := time.Second
+	maxBackoff := 30 * time.Second
+	timeout := 3 * time.Minute
+	startTime := time.Now()
+
+	for {
+		if time.Since(startTime) > timeout {
+			return fmt.Errorf("Router failed to start within %v", timeout)
+		}
+
+		req, err := http.NewRequest("GET", statusURL, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create status check request: %v", err)
+		}
+		req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to check router status: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			// Verify the VM is actually cloned
+			var statusResponse struct {
+				Data struct {
+					Status string `json:"status"`
+				} `json:"data"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&statusResponse); err != nil {
+				return fmt.Errorf("failed to decode status response: %v", err)
+			}
+			if statusResponse.Data.Status == "running" {
+				return nil
+			}
+		}
+
+		time.Sleep(backoff)
+		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
+	}
 }
