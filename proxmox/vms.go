@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -245,7 +247,7 @@ func PowerOffVirtualMachine(c *gin.Context) {
 	var error error
 	var response *VMPower
 
-	response, error = powerOffRequest(config, req)
+	response, error = PowerOffRequest(config, req)
 
 	// If we have error , return error status
 	if error != nil {
@@ -269,7 +271,7 @@ func PowerOffVirtualMachine(c *gin.Context) {
 
 }
 
-func powerOffRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
+func PowerOffRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 
 	// Create HTTP client with SSL verification based on config
 	tr := &http.Transport{
@@ -432,4 +434,112 @@ func PowerOnRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 	}
 
 	return &apiResp, nil
+}
+
+// called by cloning.CloneTemplateToPod to wait for router to finish starting
+func WaitForRunning(config *ProxmoxConfig, vm VM) error {
+	// Create a single HTTP client for all requests
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// Wait for status "running" with exponential backoff
+	statusURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/status/current",
+		config.Host, config.Port, vm.Node, vm.VMID)
+
+	backoff := time.Second
+	maxBackoff := 30 * time.Second
+	timeout := 3 * time.Minute
+	startTime := time.Now()
+
+	for {
+		if time.Since(startTime) > timeout {
+			return fmt.Errorf("vm failed to start within %v", timeout)
+		}
+
+		req, err := http.NewRequest("GET", statusURL, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create status check request: %v", err)
+		}
+		req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to check vm status: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			// Verify the VM is actually crunning
+			var statusResponse struct {
+				Data struct {
+					Status string `json:"status"`
+				} `json:"data"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&statusResponse); err != nil {
+				return fmt.Errorf("failed to decode status response: %v", err)
+			}
+			if statusResponse.Data.Status == "running" {
+				return nil
+			}
+		}
+
+		time.Sleep(backoff)
+		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
+	}
+}
+
+// return when vm is "stopped" or on timeout
+func WaitForStopped(config *ProxmoxConfig, vm VM) error {
+	// Create a single HTTP client for all requests
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// Wait for status "stopped" with exponential backoff
+	statusURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/status/current",
+		config.Host, config.Port, vm.Node, vm.VMID)
+
+	backoff := time.Second
+	maxBackoff := 30 * time.Second
+	timeout := 3 * time.Minute
+	startTime := time.Now()
+
+	for {
+		if time.Since(startTime) > timeout {
+			return fmt.Errorf("vm failed to stop within %v", timeout)
+		}
+
+		req, err := http.NewRequest("GET", statusURL, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create status check request: %v", err)
+		}
+		req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to check vm status: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			// Verify the VM is actually stopped
+			var statusResponse struct {
+				Data struct {
+					Status string `json:"status"`
+				} `json:"data"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&statusResponse); err != nil {
+				return fmt.Errorf("failed to decode status response: %v", err)
+			}
+			if statusResponse.Data.Status == "stopped" {
+				return nil
+			}
+		}
+
+		time.Sleep(backoff)
+		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
+	}
 }

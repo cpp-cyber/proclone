@@ -148,7 +148,7 @@ func CloneTemplateToPod(c *gin.Context) {
 	}
 
 	// Wait for router to be running
-	err = waitForRunning(config, *newRouter)
+	err = proxmox.WaitForRunning(config, *newRouter)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("Failed to start router VM: %v", err))
 	} else {
@@ -245,12 +245,35 @@ func setPoolPermission(config *proxmox.ProxmoxConfig, pool string, user string) 
 	return nil
 }
 
-func cleanupFailedClone(config *proxmox.ProxmoxConfig, nodeName string, vmid int) error {
+func cleanupClone(config *proxmox.ProxmoxConfig, nodeName string, vmid int) error {
 	// Create HTTP client with SSL verification based on config
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
 	}
 	client := &http.Client{Transport: tr}
+
+	/*
+	 * ----- IF RUNNING, WAIT FOR VM TO BE TURNED OFF -----
+	 */
+	// assign values to VM struct
+	var vm proxmox.VM
+	vm.Node = nodeName
+	vm.VMID = vmid
+
+	// make request to turn off VM
+	_, err := proxmox.PowerOffRequest(config, vm)
+
+	// will error if the VM is alr off so just ignore
+
+	// Wait for VM to be "stopped" before continuing
+	err = proxmox.WaitForStopped(config, vm)
+	if err != nil {
+		return fmt.Errorf("stopping vm failed: %v", err)
+	}
+
+	/*
+	 * ----- HANDLE DELETING VM -----
+	 */
 
 	// Prepare delete URL
 	deleteURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d",
@@ -362,7 +385,7 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 
 	for {
 		if time.Since(startTime) > timeout {
-			if err := cleanupFailedClone(config, vm.NodeName, newVMID); err != nil {
+			if err := cleanupClone(config, vm.NodeName, newVMID); err != nil {
 				return nil, fmt.Errorf("clone timed out and cleanup failed: %v", err)
 			}
 			return nil, fmt.Errorf("clone operation timed out after %v", timeout)
@@ -562,58 +585,4 @@ func createNewPodPool(username string, newPodID string, templateName string, con
 	}
 
 	return newPoolName, nil
-}
-
-// called by CloneTemplateToPod to wait for router to finish starting
-func waitForRunning(config *proxmox.ProxmoxConfig, vm proxmox.VM) error {
-	// Create a single HTTP client for all requests
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
-
-	// Wait for clone completion with exponential backoff
-	statusURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/status/current",
-		config.Host, config.Port, vm.Node, vm.VMID)
-
-	backoff := time.Second
-	maxBackoff := 30 * time.Second
-	timeout := 3 * time.Minute
-	startTime := time.Now()
-
-	for {
-		if time.Since(startTime) > timeout {
-			return fmt.Errorf("Router failed to start within %v", timeout)
-		}
-
-		req, err := http.NewRequest("GET", statusURL, nil)
-		if err != nil {
-			return fmt.Errorf("failed to create status check request: %v", err)
-		}
-		req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-
-		resp, err := client.Do(req)
-		if err != nil {
-			return fmt.Errorf("failed to check router status: %v", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode == http.StatusOK {
-			// Verify the VM is actually cloned
-			var statusResponse struct {
-				Data struct {
-					Status string `json:"status"`
-				} `json:"data"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&statusResponse); err != nil {
-				return fmt.Errorf("failed to decode status response: %v", err)
-			}
-			if statusResponse.Data.Status == "running" {
-				return nil
-			}
-		}
-
-		time.Sleep(backoff)
-		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
-	}
 }
