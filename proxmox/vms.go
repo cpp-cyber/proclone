@@ -313,6 +313,48 @@ func PowerOffRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 	return &apiResp, nil
 }
 
+func StopRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
+
+	// Create HTTP client with SSL verification based on config
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// Prepare status URL
+	statusURL := fmt.Sprintf("https://%s:%s/api2/extjs/nodes/%s/qemu/%s/status/stop", config.Host, config.Port, vm.Node, strconv.Itoa(vm.VMID))
+
+	// Create request
+	req, err := http.NewRequest("POST", statusURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Add Authorization header with API token
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+
+	// Make request
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stop VM: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read VM stop response: %v", err)
+	}
+
+	// Parse response
+	var apiResp VMPower
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse VM stop response: %v", err)
+	}
+
+	return &apiResp, nil
+}
+
 /*
  * ====== POWERING ON VIRTUAL MACHINES ======
  * POST requires "vmid" and "node" fields
