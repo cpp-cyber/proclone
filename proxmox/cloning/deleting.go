@@ -130,8 +130,8 @@ func DeletePod(c *gin.Context) {
 
 	// for each vm in the pool
 	for _, vm := range podVMs {
-		// should probably change this function name to just "cleanupClone" at this point
-		err := cleanupFailedClone(config, vm.NodeName, vm.VmId)
+		// clean up VM (turn off & remove)
+		err := cleanupClone(config, vm.NodeName, vm.VmId)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("Failed to delete VM %s: %v", vm.Name, err))
 		}

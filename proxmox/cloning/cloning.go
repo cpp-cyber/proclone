@@ -263,7 +263,9 @@ func cleanupClone(config *proxmox.ProxmoxConfig, nodeName string, vmid int) erro
 	// make request to turn off VM
 	_, err := proxmox.PowerOffRequest(config, vm)
 
-	// will error if the VM is alr off so just ignore
+	if err != nil {
+		// will error if the VM is alr off so just ignore
+	}
 
 	// Wait for VM to be "stopped" before continuing
 	err = proxmox.WaitForStopped(config, vm)
