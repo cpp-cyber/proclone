@@ -111,7 +111,7 @@ func CloneTemplateToPod(c *gin.Context) {
 	}
 
 	// get next avaialble pod ID
-	NewPodID, err := nextPodID(config, c)
+	NewPodID, newPodNumber, err := nextPodID(config, c)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -153,6 +153,7 @@ func CloneTemplateToPod(c *gin.Context) {
 		errors = append(errors, fmt.Sprintf("Failed to start router VM: %v", err))
 	} else {
 		// Configure router
+
 	}
 
 	// Clone each VM to new pool
@@ -163,13 +164,30 @@ func CloneTemplateToPod(c *gin.Context) {
 		}
 	}
 
-	/* Create & Configure VNet
-	 *
-	 */
+	// Check if vnet exists, if not, create it
+	vnetExists, err := checkForVnet(config, newPodNumber)
+	var vnetName string
+
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("failed to check current vnets: %v", err))
+	}
+
+	if !vnetExists {
+		vnetName, err = addVNetObject(config, newPodNumber)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("failed to create new vnet object: %v", err))
+		}
+
+		err = applySDNChanges(config)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("failed to apply new sdn changes: %v", err))
+		}
+	}
 
 	/* Configure VNet of all VMs
 	 *
 	 */
+	print(vnetName)
 
 	// automatically give user who cloned the pod access
 	err = setPoolPermission(config, NewPodPool, username.(string))
@@ -456,7 +474,7 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 }
 
 // finds lowest available POD ID between 1001 - 1255
-func nextPodID(config *proxmox.ProxmoxConfig, c *gin.Context) (string, error) {
+func nextPodID(config *proxmox.ProxmoxConfig, c *gin.Context) (string, int, error) {
 	podResponse, err := getPodResponse(config)
 
 	// if error, return error status
@@ -465,7 +483,7 @@ func nextPodID(config *proxmox.ProxmoxConfig, c *gin.Context) (string, error) {
 			"error":   "Failed to fetch pod list from proxmox cluster",
 			"details": err,
 		})
-		return "", err
+		return "", 0, err
 	}
 
 	pods := podResponse.Pods
@@ -498,10 +516,10 @@ func nextPodID(config *proxmox.ProxmoxConfig, c *gin.Context) (string, error) {
 	// if no ids available between 0 - 255 return error
 	if nextId == 1256 {
 		err = fmt.Errorf("no pod ids available")
-		return "", err
+		return "", 0, err
 	}
 
-	return strconv.Itoa(nextId), nil
+	return strconv.Itoa(nextId), nextId - 1000, nil
 }
 
 func cleanupFailedPodPool(config *proxmox.ProxmoxConfig, poolName string) error {
