@@ -40,6 +40,7 @@ type ConfigResponse struct {
 const POD_VLAN_BASE int = 1800
 const SDN_ZONE string = "MainZone"
 const WAN_SCRIPT_PATH string = "/home/update-wan-ip.sh"
+const VIP_SCRIPT_PATH string = "/home/update-wan-vip.sh"
 const WAN_IP_BASE string = "172.16."
 
 /*
@@ -129,10 +130,12 @@ func configurePodRouter(config *proxmox.ProxmoxConfig, podNum int, node string, 
 		return fmt.Errorf("qemu agent failed to execute ip change script on router: %s", string(body))
 	}
 
+	// SEND AGENT EXEC REQUEST TO CHANGE VIP SUBNET
+
 	// define json data holding new VIP subnet
 	reqBody = map[string]interface{}{
 		"command": []string{
-			WAN_SCRIPT_PATH,
+			VIP_SCRIPT_PATH,
 			fmt.Sprintf("%s%d.0", WAN_IP_BASE, podNum),
 		},
 	}
