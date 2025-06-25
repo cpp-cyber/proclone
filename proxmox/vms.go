@@ -1,6 +1,7 @@
 package proxmox
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
+
+const CRITICAL_POOL string = "0030_Critical"
 
 type VMResponse struct {
 	Data []VirtualResource `json:"data"`
@@ -54,6 +57,15 @@ type VMPower struct {
 
 type VMPowerResponse struct {
 	Success int `json:"success"`
+}
+
+type PoolResponse struct {
+	Data []Pool `json:"data"`
+}
+
+type Pool struct {
+	Poolid  string            `json:"poolid"`
+	Members []VirtualResource `json:"members"`
 }
 
 /*
@@ -182,7 +194,8 @@ func getVirtualMachineResponse(config *ProxmoxConfig) (*[]VirtualResource, error
 	// Extract virtual machines from response, store in VirtualMachine struct array
 	var vms []VirtualResource
 	for _, r := range *apiResp {
-		if r.Type == "qemu" {
+		// don't return VMS in critical resource pool, for security
+		if r.Type == "qemu" && r.ResourcePool != CRITICAL_POOL {
 			vms = append(vms, r)
 		}
 	}
@@ -272,6 +285,18 @@ func PowerOffVirtualMachine(c *gin.Context) {
 }
 
 func PowerOffRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
+	// ----- SECURITY CHECK -----
+	// make sure VM is not critical
+
+	criticalMembers, err := getPoolMembers(config, CRITICAL_POOL)
+	if err != nil {
+		return nil, fmt.Errorf("could not verify members of critical pool: %v", err)
+	}
+
+	// return unauthorized if error or vm is critical
+	if isCritical, err := isVmCritical(config, vm, &criticalMembers); err != nil || isCritical {
+		return nil, fmt.Errorf("not authorized to power off VMID %d: %v", vm.VMID, err)
+	}
 
 	// Create HTTP client with SSL verification based on config
 	tr := &http.Transport{
@@ -417,7 +442,7 @@ func PowerOnVirtualMachine(c *gin.Context) {
 	// If we have error , return error status
 	if error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to fetch resource usage for any nodes",
+			"error":   "failed to power on virtual machine",
 			"details": error,
 		})
 		return
@@ -427,16 +452,29 @@ func PowerOnVirtualMachine(c *gin.Context) {
 	finalResponse.Success = response.Success
 
 	if finalResponse.Success == 1 {
-		log.Printf("Successfully powered down VMID %s for %s", strconv.Itoa(req.VMID), username)
+		log.Printf("Successfully powered on VMID %s for %s", strconv.Itoa(req.VMID), username)
 		c.JSON(http.StatusOK, response)
 	} else {
-		log.Printf("Failed to power down VMID %s for %s", strconv.Itoa(req.VMID), username)
+		log.Printf("Failed to power on VMID %s for %s", strconv.Itoa(req.VMID), username)
 		c.JSON(http.StatusOK, response)
 	}
 
 }
 
 func PowerOnRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
+
+	// ----- SECURITY CHECK -----
+	// make sure VM is not critical
+
+	criticalMembers, err := getPoolMembers(config, CRITICAL_POOL)
+	if err != nil {
+		return nil, fmt.Errorf("could not verify members of critical pool: %v", err)
+	}
+
+	// return unauthorized if error or vm is critical
+	if isCritical, err := isVmCritical(config, vm, &criticalMembers); err != nil || isCritical {
+		return nil, fmt.Errorf("not authorized to power on VMID %d: %v", vm.VMID, err)
+	}
 
 	// Create HTTP client with SSL verification based on config
 	tr := &http.Transport{
@@ -445,10 +483,10 @@ func PowerOnRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 	client := &http.Client{Transport: tr}
 
 	// Prepare status URL
-	statusURL := fmt.Sprintf("https://%s:%s/api2/extjs/nodes/%s/qemu/%s/status/start", config.Host, config.Port, vm.Node, strconv.Itoa(vm.VMID))
+	startURL := fmt.Sprintf("https://%s:%s/api2/extjs/nodes/%s/qemu/%s/status/start", config.Host, config.Port, vm.Node, strconv.Itoa(vm.VMID))
 
 	// Create request
-	req, err := http.NewRequest("POST", statusURL, nil)
+	req, err := http.NewRequest("POST", startURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %v", err)
 	}
@@ -584,4 +622,64 @@ func WaitForStopped(config *ProxmoxConfig, vm VM) error {
 		time.Sleep(backoff)
 		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
 	}
+}
+
+// return whether or not a vm is in a resource pool member list
+func isVmCritical(config *ProxmoxConfig, vm VM, poolMembers *[]VirtualResource) (isInCritical bool, err error) {
+	for _, poolVm := range *poolMembers {
+		if poolVm.VmId == vm.VMID {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func getPoolMembers(config *ProxmoxConfig, pool string) (members []VirtualResource, err error) {
+	// Create a single HTTP client for all requests
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// Wait for status "stopped" with exponential backoff
+	poolURL := fmt.Sprintf("https://%s:%s/api2/json/pools",
+		config.Host, config.Port)
+
+	body := map[string]interface{}{
+		"poolid": CRITICAL_POOL,
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request body: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", poolURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pool request: %v", err)
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get critical pool: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read pool response body: %v", err)
+	}
+
+	// Parse
+	var poolResponse PoolResponse
+	err = json.Unmarshal(respBody, &poolResponse)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal pool response body: %v", err)
+	}
+
+	return poolResponse.Data[0].Members, nil
 }
