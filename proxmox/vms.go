@@ -655,7 +655,7 @@ func getPoolMembers(config *ProxmoxConfig, pool string) (members []VirtualResour
 		return nil, fmt.Errorf("failed to create request body: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", poolURL, bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequest("GET", poolURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pool request: %v", err)
 	}
