@@ -140,22 +140,6 @@ func CloneTemplateToPod(c *gin.Context) {
 		errors = append(errors, fmt.Sprintf("Failed to clone router VM: %v", err))
 	}
 
-	// Turn on router
-	_, err = proxmox.PowerOnRequest(config, *newRouter)
-
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("Failed to start router VM: %v", err))
-	}
-
-	// Wait for router to be running
-	err = proxmox.WaitForRunning(config, *newRouter)
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("Failed to start router VM: %v", err))
-	} else {
-		// Configure router
-
-	}
-
 	// Clone each VM to new pool
 	for _, vm := range templateVMs {
 		_, err := cloneVM(config, vm, NewPodPool)
@@ -190,6 +174,22 @@ func CloneTemplateToPod(c *gin.Context) {
 	err = setPodVnet(config, NewPodPool, vnetName)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("Failed to update pod vnet: %v", err))
+	}
+
+	// Turn on router
+	_, err = proxmox.PowerOnRequest(config, *newRouter)
+
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Failed to start router VM: %v", err))
+	}
+
+	// Wait for router to be running
+	err = proxmox.WaitForRunning(config, *newRouter)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Failed to start router VM: %v", err))
+	} else {
+		// Configure router
+
 	}
 
 	// automatically give user who cloned the pod access
