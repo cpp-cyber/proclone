@@ -32,7 +32,7 @@ type Config struct {
 
 type ConfigResponse struct {
 	Data    Config `json:"data"`
-	Success bool   `json:"success"`
+	Success int    `json:"success"`
 }
 
 const POD_VLAN_BASE int = 1800
