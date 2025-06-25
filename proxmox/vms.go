@@ -294,7 +294,7 @@ func PowerOffRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 	}
 
 	// return unauthorized if error or vm is critical
-	if isCritical, err := isVmCritical(config, vm, &criticalMembers); err != nil || isCritical {
+	if isCritical, err := isVmCritical(vm, &criticalMembers); err != nil || isCritical {
 		return nil, fmt.Errorf("not authorized to power off VMID %d: %v", vm.VMID, err)
 	}
 
@@ -433,17 +433,15 @@ func PowerOnVirtualMachine(c *gin.Context) {
 
 	// log request on backend
 	log.Printf("User %s requested to power on VM %d on node %s", username, req.VMID, req.Node)
-
-	var error error
 	var response *VMPower
 
-	response, error = PowerOnRequest(config, req)
+	response, err = PowerOnRequest(config, req)
 
 	// If we have error , return error status
-	if error != nil {
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to power on virtual machine",
-			"details": error,
+			"details": err.Error(),
 		})
 		return
 	}
@@ -472,7 +470,7 @@ func PowerOnRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 	}
 
 	// return unauthorized if error or vm is critical
-	if isCritical, err := isVmCritical(config, vm, &criticalMembers); err != nil || isCritical {
+	if isCritical, err := isVmCritical(vm, &criticalMembers); err != nil || isCritical {
 		return nil, fmt.Errorf("not authorized to power on VMID %d: %v", vm.VMID, err)
 	}
 
@@ -625,7 +623,7 @@ func WaitForStopped(config *ProxmoxConfig, vm VM) error {
 }
 
 // return whether or not a vm is in a resource pool member list
-func isVmCritical(config *ProxmoxConfig, vm VM, poolMembers *[]VirtualResource) (isInCritical bool, err error) {
+func isVmCritical(vm VM, poolMembers *[]VirtualResource) (isInCritical bool, err error) {
 	for _, poolVm := range *poolMembers {
 		if poolVm.VmId == vm.VMID {
 			return true, nil
@@ -647,7 +645,7 @@ func getPoolMembers(config *ProxmoxConfig, pool string) (members []VirtualResour
 		config.Host, config.Port)
 
 	body := map[string]interface{}{
-		"poolid": CRITICAL_POOL,
+		"poolid": pool,
 	}
 
 	jsonBody, err := json.Marshal(body)
