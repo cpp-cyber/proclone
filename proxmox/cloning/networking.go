@@ -93,7 +93,7 @@ func configurePodRouter(config *proxmox.ProxmoxConfig, podNum int, node string, 
 	execURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/agent/exec", config.Host,
 		config.Port, node, vmid)
 
-	// define json data holding new VNet parameters
+	// define json data holding new WAN IP
 	reqBody := map[string]interface{}{
 		"command": []string{
 			WAN_SCRIPT_PATH,
@@ -103,13 +103,13 @@ func configurePodRouter(config *proxmox.ProxmoxConfig, podNum int, node string, 
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return fmt.Errorf("failed to create request body: %v", err)
+		return fmt.Errorf("failed to create ip request body: %v", err)
 	}
 
 	// create request
 	req, err := http.NewRequest("POST", execURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
-		return fmt.Errorf("failed to create agent exec request: %v", err)
+		return fmt.Errorf("failed to create ip agent exec request: %v", err)
 	}
 
 	// set respective request headers
@@ -119,14 +119,50 @@ func configurePodRouter(config *proxmox.ProxmoxConfig, podNum int, node string, 
 	// send request with client
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("qemu agent failed to execute IP change script on router: %v", err)
+		return fmt.Errorf("qemu agent failed to execute ip change script on router: %v", err)
 	}
 	defer resp.Body.Close()
 
 	// handle response and return
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("qemu agent failed to execute IP change script on router: %s", string(body))
+		return fmt.Errorf("qemu agent failed to execute ip change script on router: %s", string(body))
+	}
+
+	// define json data holding new VIP subnet
+	reqBody = map[string]interface{}{
+		"command": []string{
+			WAN_SCRIPT_PATH,
+			fmt.Sprintf("%s%d.0", WAN_IP_BASE, podNum),
+		},
+	}
+
+	jsonBody, err = json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to create vip request body: %v", err)
+	}
+
+	// create request
+	req, err = http.NewRequest("POST", execURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return fmt.Errorf("failed to create vip agent exec request: %v", err)
+	}
+
+	// set respective request headers
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	// send request with client
+	resp, err = client.Do(req)
+	if err != nil {
+		return fmt.Errorf("qemu agent failed to execute vip change script on router: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// handle response and return
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("qemu agent failed to execute vip change script on router: %s", string(body))
 	}
 
 	return nil
