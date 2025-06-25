@@ -95,7 +95,10 @@ func configurePodRouter(config *proxmox.ProxmoxConfig, podNum int, node string, 
 
 	// define json data holding new VNet parameters
 	reqBody := map[string]interface{}{
-		"command": fmt.Sprintf("[\"%s\", \"%s%d.1\"]", WAN_SCRIPT_PATH, WAN_IP_BASE, podNum),
+		"command": []string{
+			WAN_SCRIPT_PATH,
+			fmt.Sprintf("%s%d.1", WAN_IP_BASE, podNum),
+		},
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
