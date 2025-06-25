@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 
 	"github.com/P-E-D-L/proclone/proxmox"
 )
@@ -24,9 +25,22 @@ type VNet struct {
 	VlanAware int    `json:"vlanaware,omitempty"`
 }
 
+type Config struct {
+	Net0 string `json:"net0"`
+	Net1 string `json:"net1,omitempty"`
+}
+
+type ConfigResponse struct {
+	Data    Config `json:"data"`
+	Success bool   `json:"success"`
+}
+
 const POD_VLAN_BASE int = 1800
 const SDN_ZONE string = "MainZone"
 
+/*
+ * ----- CHECK BY NAME FOR VNET ALREADY IN CLUSTER -----
+ */
 func checkForVnet(config *proxmox.ProxmoxConfig, podID int) (exists bool, err error) {
 	// Create HTTP client with SSL verification based on config
 	tr := &http.Transport{
@@ -170,4 +184,173 @@ func applySDNChanges(config *proxmox.ProxmoxConfig) error {
 	} else {
 		return nil
 	}
+}
+
+/*
+ * ----- CONFIGURES NETWORK BRIDGE (VNET) FOR ALL VMS IN A POD -----
+ */
+func setPodVnet(config *proxmox.ProxmoxConfig, podName string, vnet string) error {
+	// Create HTTP client with SSL verification based on config
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// Prepare VNet URL
+	poolURL := fmt.Sprintf("https://%s:%s/api2/json/pools/%s", config.Host, config.Port, podName)
+
+	// create request
+	req, err := http.NewRequest("GET", poolURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create a resource pool request: %v", err)
+	}
+
+	// set respective request headers
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+
+	// send request with client
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to request pool members: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read proxmox resource pool response: %v", err)
+	}
+
+	var apiResp PoolResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return fmt.Errorf("failed to parse pool response: %v", err)
+	}
+
+	for _, vm := range apiResp.Data.Members {
+		err = updateVNet(config, &vm, vnet)
+		if err != nil {
+			return fmt.Errorf("failed to update VNet: %v", err)
+		}
+	}
+
+	return nil
+}
+
+/*
+ * ----- CONFIGURE NETWORK BRIDGE FOR A SINGLE VM -----
+ * automatically handles configuration of normal vms and routers
+ */
+func updateVNet(config *proxmox.ProxmoxConfig, vm *proxmox.VirtualResource, newBridge string) error {
+	// ----- get current network config -----
+
+	// Create HTTP client with SSL verification based on config
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// Prepare config URL
+	configURL := fmt.Sprintf("https://%s:%s/api2/extjs/nodes/%s/qemu/%d/config", config.Host, config.Port, vm.NodeName, vm.VmId)
+
+	// create request
+	req, err := http.NewRequest("GET", configURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create a vm config request: %v", err)
+	}
+
+	// set respective request headers
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+
+	// send request with client
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to request vm config: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read proxmox vm config response: %v", err)
+	}
+
+	// Parse response body
+	var apiResp ConfigResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return fmt.Errorf("failed to parse vm config response: %v", err)
+	}
+
+	// Handle vms with two interfaces (routers) seperately from vms with one interface
+	if apiResp.Data.Net1 == "" {
+		newConfig := replaceBridge(apiResp.Data.Net0, newBridge)
+		err := setNetworkBridge(config, vm, "net0", newConfig)
+		if err != nil {
+			return err
+		}
+	} else {
+		newConfig := replaceBridge(apiResp.Data.Net1, newBridge)
+		err := setNetworkBridge(config, vm, "net1", newConfig)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// helper function to replace the network bridge in a vm config using regex
+func replaceBridge(netStr string, newBridge string) string {
+	re := regexp.MustCompile(`bridge=[^,]+`)
+	return re.ReplaceAllString(netStr, "bridge="+newBridge)
+}
+
+/*
+ * ----- SET NETWORK BRIDGE FOR A SINGLE VM -----
+ * automatically handles configuration of normal vms and routers
+ */
+func setNetworkBridge(config *proxmox.ProxmoxConfig, vm *proxmox.VirtualResource, net string, newConfig string) error {
+	// ----- set network config -----
+	// Create HTTP client with SSL verification based on config
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// Prepare config URL
+	configURL := fmt.Sprintf("https://%s:%s/api2/extjs/nodes/%s/qemu/%d/config", config.Host, config.Port, vm.NodeName, vm.VmId)
+
+	// define json data holding new VNet parameters
+	reqBody := map[string]interface{}{
+		net: newConfig,
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to create request body: %v", err)
+	}
+
+	// create request
+	req, err := http.NewRequest("PUT", configURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return fmt.Errorf("failed to create a vm config change request: %v", err)
+	}
+
+	// set respective request headers
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	// send request with client
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to set vm config: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// handle response and return
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to set vm config: %s", string(body))
+	}
+
+	return nil
 }

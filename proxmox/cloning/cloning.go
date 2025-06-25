@@ -182,12 +182,15 @@ func CloneTemplateToPod(c *gin.Context) {
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to apply new sdn changes: %v", err))
 		}
+	} else {
+		vnetName = fmt.Sprintf("kamino%d", newPodNumber)
 	}
 
-	/* Configure VNet of all VMs
-	 *
-	 */
-	print(vnetName)
+	// Configure VNet of all VMs
+	err = setPodVnet(config, NewPodPool, vnetName)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Failed to update pod vnet: %v", err))
+	}
 
 	// automatically give user who cloned the pod access
 	err = setPoolPermission(config, NewPodPool, username.(string))
