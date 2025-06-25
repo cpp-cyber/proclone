@@ -1,7 +1,6 @@
 package proxmox
 
 import (
-	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -644,21 +643,11 @@ func getPoolMembers(config *ProxmoxConfig, pool string) (members []VirtualResour
 	poolURL := fmt.Sprintf("https://%s:%s/api2/json/pools",
 		config.Host, config.Port)
 
-	body := map[string]interface{}{
-		"poolid": pool,
-	}
-
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request body: %v", err)
-	}
-
-	req, err := http.NewRequest("GET", poolURL, bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequest("GET", poolURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pool request: %v", err)
 	}
 	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -679,5 +668,12 @@ func getPoolMembers(config *ProxmoxConfig, pool string) (members []VirtualResour
 		return nil, fmt.Errorf("failed to unmarshal pool response body: %v", err)
 	}
 
-	return poolResponse.Data[0].Members, nil
+	for _, pool := range poolResponse.Data {
+		if pool.Poolid == CRITICAL_POOL {
+			return pool.Members, nil
+		}
+	}
+
+	return nil, fmt.Errorf("failed to identify resource pool with id %s", CRITICAL_POOL)
+
 }
