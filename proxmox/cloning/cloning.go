@@ -71,7 +71,7 @@ func CloneTemplateToPod(c *gin.Context) {
 	if err != nil {
 		log.Printf("Configuration error for user %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to load Proxmox configuration: %v", err),
+			"error": fmt.Sprintf("failed to load Proxmox configuration: %v", err),
 		})
 		return
 	}
@@ -80,7 +80,7 @@ func CloneTemplateToPod(c *gin.Context) {
 	apiResp, err := proxmox.GetVirtualResources(config)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to fetch virtual resources",
+			"error":   "failed to fetch virtual resources",
 			"details": err.Error(),
 		})
 		return
@@ -115,7 +115,7 @@ func CloneTemplateToPod(c *gin.Context) {
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to get a pod ID",
+			"error":   "failed to get a pod ID",
 			"details": err.Error(),
 		})
 		return
@@ -126,7 +126,7 @@ func CloneTemplateToPod(c *gin.Context) {
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to create new pod resource pool",
+			"error":   "failed to create new pod resource pool",
 			"details": err.Error(),
 		})
 		return
@@ -137,14 +137,14 @@ func CloneTemplateToPod(c *gin.Context) {
 	 */
 	newRouter, err := cloneVM(config, routerTemplate, NewPodPool)
 	if err != nil {
-		errors = append(errors, fmt.Sprintf("Failed to clone router VM: %v", err))
+		errors = append(errors, fmt.Sprintf("failed to clone router VM: %v", err))
 	}
 
 	// Clone each VM to new pool
 	for _, vm := range templateVMs {
 		_, err := cloneVM(config, vm, NewPodPool)
 		if err != nil {
-			errors = append(errors, fmt.Sprintf("Failed to clone VM %s: %v", vm.Name, err))
+			errors = append(errors, fmt.Sprintf("failed to clone VM %s: %v", vm.Name, err))
 		}
 	}
 
@@ -173,29 +173,31 @@ func CloneTemplateToPod(c *gin.Context) {
 	// Configure VNet of all VMs
 	err = setPodVnet(config, NewPodPool, vnetName)
 	if err != nil {
-		errors = append(errors, fmt.Sprintf("Failed to update pod vnet: %v", err))
+		errors = append(errors, fmt.Sprintf("failed to update pod vnet: %v", err))
 	}
 
 	// Turn on router
 	_, err = proxmox.PowerOnRequest(config, *newRouter)
 
 	if err != nil {
-		errors = append(errors, fmt.Sprintf("Failed to start router VM: %v", err))
+		errors = append(errors, fmt.Sprintf("failed to start router VM: %v", err))
 	}
 
 	// Wait for router to be running
 	err = proxmox.WaitForRunning(config, *newRouter)
 	if err != nil {
-		errors = append(errors, fmt.Sprintf("Failed to start router VM: %v", err))
+		errors = append(errors, fmt.Sprintf("failed to start router VM: %v", err))
 	} else {
-		// Configure router
-
+		err = configurePodRouter(config, newPodNumber, newRouter.Node, newRouter.VMID)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("failed to configure pod router: %v", err))
+		}
 	}
 
 	// automatically give user who cloned the pod access
 	err = setPoolPermission(config, NewPodPool, username.(string))
 	if err != nil {
-		errors = append(errors, fmt.Sprintf("Failed to update pool permissions for %s: %v", username, err))
+		errors = append(errors, fmt.Sprintf("failed to update pool permissions for %s: %v", username, err))
 	}
 
 	var success int = 0
@@ -483,7 +485,7 @@ func nextPodID(config *proxmox.ProxmoxConfig, c *gin.Context) (string, int, erro
 	// if error, return error status
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to fetch pod list from proxmox cluster",
+			"error":   "failed to fetch pod list from proxmox cluster",
 			"details": err,
 		})
 		return "", 0, err

@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/P-E-D-L/proclone/proxmox"
 )
@@ -37,6 +39,95 @@ type ConfigResponse struct {
 
 const POD_VLAN_BASE int = 1800
 const SDN_ZONE string = "MainZone"
+const WAN_SCRIPT_PATH string = "/home/update-wan-ip.sh"
+const WAN_IP_BASE string = "172.16."
+
+/*
+ * ----- SETS THE WAN IP ADDRESS OF A POD ROUTER -----
+ * depends on the pfSense router template having a qemu agent installed and enabled
+ */
+func configurePodRouter(config *proxmox.ProxmoxConfig, podNum int, node string, vmid int) error {
+	// Create HTTP client with SSL verification based on config
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// wait for router agent to be pingable
+
+	statusURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/agent/ping",
+		config.Host, config.Port, node, vmid)
+
+	backoff := time.Second
+	maxBackoff := 30 * time.Second
+	timeout := 5 * time.Minute
+	startTime := time.Now()
+
+	for {
+		if time.Since(startTime) > timeout {
+			return fmt.Errorf("router qemu agent timed out")
+		}
+
+		req, err := http.NewRequest("POST", statusURL, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create agent ping request: %v", err)
+		}
+		req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to check agent status: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			break
+		}
+
+		time.Sleep(backoff)
+		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
+	}
+
+	// configure router WAN ip to have correct third octet using qemu agent api call
+
+	execURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/agent/exec", config.Host,
+		config.Port, node, vmid)
+
+	// define json data holding new VNet parameters
+	reqBody := map[string]interface{}{
+		"command": fmt.Sprintf("[\"%s\", \"%s%d.1\"]", WAN_SCRIPT_PATH, WAN_IP_BASE, podNum),
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to create request body: %v", err)
+	}
+
+	// create request
+	req, err := http.NewRequest("POST", execURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return fmt.Errorf("failed to create agent exec request: %v", err)
+	}
+
+	// set respective request headers
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	// send request with client
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("qemu agent failed to execute IP change script on router: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// handle response and return
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("qemu agent failed to execute IP change script on router: %s", string(body))
+	}
+
+	return nil
+}
 
 /*
  * ----- CHECK BY NAME FOR VNET ALREADY IN CLUSTER -----
