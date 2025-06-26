@@ -409,7 +409,7 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 
 	// Wait for clone completion with exponential backoff
 	statusURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/status/current",
-		config.Host, config.Port, vm.NodeName, newVMID)
+		config.Host, config.Port, bestNode, newVMID)
 
 	backoff := time.Second
 	maxBackoff := 30 * time.Second
@@ -448,7 +448,7 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 			}
 			if statusResponse.Data.Status == "running" || statusResponse.Data.Status == "stopped" {
 				lockURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/config",
-					config.Host, config.Port, vm.NodeName, newVMID)
+					config.Host, config.Port, bestNode, newVMID)
 				lockReq, err := http.NewRequest("GET", lockURL, nil)
 				if err != nil {
 					return nil, fmt.Errorf("failed to create lock check request: %v", err)
@@ -474,7 +474,7 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 					newVM.VMID = newVMID
 
 					// once node optimization is done must be replaced with new node !!!
-					newVM.Node = vm.NodeName
+					newVM.Node = bestNode
 
 					return &newVM, nil // Clone is complete and VM is not locked
 				}
