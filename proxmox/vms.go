@@ -36,6 +36,7 @@ type VirtualResource struct {
 	Storage       string  `json:"storage,omitempty"`
 	Disk          int64   `json:"disk,omitempty"`
 	MaxDisk       int64   `json:"maxdisk,omitempty"`
+	Template      int     `json:"template,omitempty"`
 }
 
 type VirtualMachineResponse struct {
@@ -110,7 +111,7 @@ func GetVirtualMachines(c *gin.Context) {
 	response.RunningCount = 0
 
 	// get virtual machine info and include in response
-	virtualMachines, error = getVirtualMachineResponse(config)
+	virtualMachines, error = GetVirtualMachineResponse(config)
 
 	// if error, return error status
 	if error != nil {
@@ -180,7 +181,7 @@ func GetVirtualResources(config *ProxmoxConfig) (*[]VirtualResource, error) {
 
 }
 
-func getVirtualMachineResponse(config *ProxmoxConfig) (*[]VirtualResource, error) {
+func GetVirtualMachineResponse(config *ProxmoxConfig) (*[]VirtualResource, error) {
 
 	// get all virtual resources from proxmox
 	apiResp, err := GetVirtualResources(config)
@@ -668,9 +669,9 @@ func getPoolMembers(config *ProxmoxConfig, pool string) (members []VirtualResour
 		return nil, fmt.Errorf("failed to unmarshal pool response body: %v", err)
 	}
 
-	for _, pool := range poolResponse.Data {
-		if pool.Poolid == CRITICAL_POOL {
-			return pool.Members, nil
+	for _, responsePool := range poolResponse.Data {
+		if responsePool.Poolid == pool {
+			return responsePool.Members, nil
 		}
 	}
 

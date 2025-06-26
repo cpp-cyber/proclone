@@ -367,15 +367,23 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 		return nil, fmt.Errorf("invalid VMID received: %v", err)
 	}
 
-	// Prepare and execute clone request
+	// Prepare clone request
 	cloneURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/clone",
 		config.Host, config.Port, vm.NodeName, vm.VmId)
 
-	body := map[string]interface{}{
-		"newid": newVMID,
-		"name":  fmt.Sprintf("%s-clone", vm.Name),
-		"pool":  newPool,
+	// Find most optimal compute node for clone
+	bestNode, err := findBestNode(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate optimal compuet node: %v", err)
 	}
+
+	body := map[string]interface{}{
+		"newid":  newVMID,
+		"name":   fmt.Sprintf("%s-clone", vm.Name),
+		"pool":   newPool,
+		"target": bestNode,
+	}
+
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request body: %v", err)
