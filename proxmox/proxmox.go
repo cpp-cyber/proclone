@@ -69,8 +69,8 @@ func LoadProxmoxConfig() (*ProxmoxConfig, error) {
 	return config, nil
 }
 
-// getNodeStatus fetches the status of a single Proxmox node
-func getNodeStatus(config *ProxmoxConfig, nodeName string) (*ProxmoxNodeStatus, error) {
+// GetNodeStatus fetches the status of a single Proxmox node
+func GetNodeStatus(config *ProxmoxConfig, nodeName string) (*ProxmoxNodeStatus, error) {
 	// Create HTTP client with SSL verification based on config
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
