@@ -177,6 +177,7 @@ func CloneTemplateToPod(c *gin.Context) {
 	}
 
 	// Turn on router
+	time.Sleep(5 * time.Second)
 	_, err = proxmox.PowerOnRequest(config, *newRouter)
 
 	if err != nil {
