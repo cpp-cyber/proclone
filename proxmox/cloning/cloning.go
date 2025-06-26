@@ -2,6 +2,7 @@ package cloning
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/P-E-D-L/proclone/auth"
 	"github.com/P-E-D-L/proclone/proxmox"
+	"github.com/P-E-D-L/proclone/proxmox/cloning/locking"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -336,76 +338,9 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 	}
 	client := &http.Client{Transport: tr}
 
-	// Get next available VMID
-	nextIDURL := fmt.Sprintf("https://%s:%s/api2/json/cluster/nextid", config.Host, config.Port)
-	req, err := http.NewRequest("GET", nextIDURL, nil)
+	bestNode, newVMID, err := makeCloneRequest(config, vm, newPool)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create VMID request: %v", err)
-	}
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get next VMID: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to get next VMID: %s", string(body))
-	}
-
-	var nextIDResponse struct {
-		Data string `json:"data"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&nextIDResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode VMID response: %v", err)
-	}
-
-	newVMID, err := strconv.Atoi(nextIDResponse.Data)
-	if err != nil {
-		return nil, fmt.Errorf("invalid VMID received: %v", err)
-	}
-
-	// Prepare clone request
-	cloneURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/clone",
-		config.Host, config.Port, vm.NodeName, vm.VmId)
-
-	// Find most optimal compute node for clone
-	bestNode, err := findBestNode(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to calculate optimal compuet node: %v", err)
-	}
-
-	body := map[string]interface{}{
-		"newid":  newVMID,
-		"name":   fmt.Sprintf("%s-clone", vm.Name),
-		"pool":   newPool,
-		"target": bestNode,
-	}
-
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request body: %v", err)
-	}
-
-	req, err = http.NewRequest("POST", cloneURL, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create clone request: %v", err)
-	}
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err = client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to clone VM: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to clone VM: %s", string(body))
+		return nil, err
 	}
 
 	// Wait for clone completion with exponential backoff
@@ -425,13 +360,13 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 			return nil, fmt.Errorf("clone operation timed out after %v", timeout)
 		}
 
-		req, err = http.NewRequest("GET", statusURL, nil)
+		req, err := http.NewRequest("GET", statusURL, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create status check request: %v", err)
 		}
 		req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
 
-		resp, err = client.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check clone status: %v", err)
 		}
@@ -485,6 +420,101 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 		time.Sleep(backoff)
 		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
 	}
+}
+
+func makeCloneRequest(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool string) (node string, vmid int, err error) {
+	// Create a single HTTP client for all requests
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	// set mutex lock
+	// this lock is to prevent race conditions where multiple clone requests close
+	// together may try to use the same vmid and fail
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	lock, err := locking.TryAcquireLockWithBackoff(ctx, "lock:vmid", 30*time.Second, 5, 500*time.Millisecond)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to acquire vmid lock: %v", err)
+	}
+	defer lock.Release(ctx)
+
+	// Get next available VMID
+	nextIDURL := fmt.Sprintf("https://%s:%s/api2/json/cluster/nextid", config.Host, config.Port)
+	req, err := http.NewRequest("GET", nextIDURL, nil)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to create VMID request: %v", err)
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to get next VMID: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", 0, fmt.Errorf("failed to get next VMID: %s", string(body))
+	}
+
+	var nextIDResponse struct {
+		Data string `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&nextIDResponse); err != nil {
+		return "", 0, fmt.Errorf("failed to decode VMID response: %v", err)
+	}
+
+	newVMID, err := strconv.Atoi(nextIDResponse.Data)
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid VMID received: %v", err)
+	}
+
+	// Prepare clone request
+	cloneURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/clone",
+		config.Host, config.Port, vm.NodeName, vm.VmId)
+
+	// Find most optimal compute node for clone
+	bestNode, err := findBestNode(config)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to calculate optimal compuet node: %v", err)
+	}
+
+	body := map[string]interface{}{
+		"newid":  newVMID,
+		"name":   fmt.Sprintf("%s-clone", vm.Name),
+		"pool":   newPool,
+		"target": bestNode,
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to create request body: %v", err)
+	}
+
+	req, err = http.NewRequest("POST", cloneURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to create clone request: %v", err)
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err = client.Do(req)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to clone VM: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", 0, fmt.Errorf("failed to clone VM: %s", string(body))
+	}
+
+	return bestNode, newVMID, nil
 }
 
 // finds lowest available POD ID between 1001 - 1255
