@@ -28,8 +28,9 @@ type VNet struct {
 }
 
 type Config struct {
-	Net0 string `json:"net0"`
-	Net1 string `json:"net1,omitempty"`
+	HardDisk string `json:"scsi0"`
+	Net0     string `json:"net0"`
+	Net1     string `json:"net1,omitempty"`
 }
 
 type ConfigResponse struct {
@@ -369,13 +370,8 @@ func setPodVnet(config *proxmox.ProxmoxConfig, podName string, vnet string) erro
 	return nil
 }
 
-/*
- * ----- CONFIGURE NETWORK BRIDGE FOR A SINGLE VM -----
- * automatically handles configuration of normal vms and routers
- */
-func updateVNet(config *proxmox.ProxmoxConfig, vm *proxmox.VirtualResource, newBridge string) error {
-	// ----- get current network config -----
-
+// Gets config of a specific vm
+func getVMConfig(config *proxmox.ProxmoxConfig, node string, vmid int) (response *ConfigResponse, err error) {
 	// Create HTTP client with SSL verification based on config
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
@@ -383,12 +379,12 @@ func updateVNet(config *proxmox.ProxmoxConfig, vm *proxmox.VirtualResource, newB
 	client := &http.Client{Transport: tr}
 
 	// Prepare config URL
-	configURL := fmt.Sprintf("https://%s:%s/api2/extjs/nodes/%s/qemu/%d/config", config.Host, config.Port, vm.NodeName, vm.VmId)
+	configURL := fmt.Sprintf("https://%s:%s/api2/extjs/nodes/%s/qemu/%d/config", config.Host, config.Port, node, vmid)
 
 	// create request
 	req, err := http.NewRequest("GET", configURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create a vm config request: %v", err)
+		return nil, fmt.Errorf("failed to create a vm config request: %v", err)
 	}
 
 	// set respective request headers
@@ -397,20 +393,35 @@ func updateVNet(config *proxmox.ProxmoxConfig, vm *proxmox.VirtualResource, newB
 	// send request with client
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to request vm config: %v", err)
+		return nil, fmt.Errorf("failed to request vm config: %v", err)
 	}
 	defer resp.Body.Close()
 
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read proxmox vm config response: %v", err)
+		return nil, fmt.Errorf("failed to read proxmox vm config response: %v", err)
 	}
 
 	// Parse response body
 	var apiResp ConfigResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return fmt.Errorf("failed to parse vm config response: %v", err)
+		return nil, fmt.Errorf("failed to parse vm config response: %v", err)
+	}
+
+	return &apiResp, nil
+}
+
+/*
+ * ----- CONFIGURE NETWORK BRIDGE FOR A SINGLE VM -----
+ * automatically handles configuration of normal vms and routers
+ */
+func updateVNet(config *proxmox.ProxmoxConfig, vm *proxmox.VirtualResource, newBridge string) error {
+	// ----- get current network config -----
+
+	apiResp, err := getVMConfig(config, vm.NodeName, vm.VmId)
+	if err != nil {
+		return err
 	}
 
 	// Handle vms with two interfaces (routers) seperately from vms with one interface
