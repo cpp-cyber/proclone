@@ -10,8 +10,10 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/P-E-D-L/proclone/auth"
@@ -23,6 +25,8 @@ import (
 
 const KAMINO_TEMP_POOL string = "0100_Kamino_Templates"
 const ROUTER_NAME string = "1-1NAT-pfsense"
+
+var STORAGE_ID string = os.Getenv("STORAGE_ID")
 
 type CloneRequest struct {
 	TemplateName string `json:"template_name" binding:"required"`
@@ -36,6 +40,15 @@ type CloneResponse struct {
 	Success int      `json:"success"`
 	PodName string   `json:"pod_name"`
 	Errors  []string `json:"errors,omitempty"`
+}
+
+type StorageResponse struct {
+	Data []Disk `json:"data"`
+}
+type Disk struct {
+	Id   string `json:"volid,omitempty"`
+	Size int64  `json:"size,omitempty"`
+	Used int64  `json:"used,omitempty"`
 }
 
 /*
@@ -179,7 +192,10 @@ func CloneTemplateToPod(c *gin.Context) {
 	}
 
 	// Turn on router
-	time.Sleep(5 * time.Second)
+	err = waitForDiskAvailability(config, newRouter.Node, newRouter.VMID, 15*time.Second)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("router disk unavailable: %v", err))
+	}
 	_, err = proxmox.PowerOnRequest(config, *newRouter)
 
 	if err != nil {
@@ -649,4 +665,80 @@ func createNewPodPool(username string, newPodID string, templateName string, con
 	}
 
 	return newPoolName, nil
+}
+
+func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid int, maxWait time.Duration) error {
+	start := time.Now()
+	for {
+		if time.Since(start) > maxWait {
+			return fmt.Errorf("timeout waiting for VM disks to become available")
+		}
+
+		status, err := getVMConfig(config, node, vmid)
+		if err != nil {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		if status.Data.HardDisk == "" {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		imageId := strings.Split(status.Data.HardDisk, ",")[0]
+
+		disks, err := getStorageContent(config, node, STORAGE_ID)
+		if err != nil {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		for _, d := range *disks {
+			if d.Id == imageId && d.Used > 0 {
+				return nil
+			}
+		}
+
+		time.Sleep(2 * time.Second)
+	}
+}
+
+func getStorageContent(config *proxmox.ProxmoxConfig, node string, storage string) (response *[]Disk, err error) {
+	// Create HTTP client with SSL verification based on config
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
+	}
+	client := &http.Client{Transport: tr}
+
+	contentURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/storage/%s/content", config.Host, config.Port, node, storage)
+
+	// Create request
+	req, err := http.NewRequest("GET", contentURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Add API token header
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
+
+	// Send request
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get storage content: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read storage content response: %v", err)
+	}
+
+	// Parse response into StorageResponse struct
+	var apiResp StorageResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse storage content response: %v", err)
+	}
+
+	return &apiResp.Data, nil
 }
