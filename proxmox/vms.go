@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math"
 	"net/http"
@@ -141,34 +140,12 @@ func GetVirtualMachines(c *gin.Context) {
 
 // handles fetching all the virtual machines on the proxmox cluster
 func GetVirtualResources(config *ProxmoxConfig) (*[]VirtualResource, error) {
-	// Create HTTP client with SSL verification based on config
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
 
-	vmURL := fmt.Sprintf("https://%s:%s/api2/json/cluster/resources", config.Host, config.Port)
+	path := "api2/json/cluster/resources"
 
-	// Create request
-	req, err := http.NewRequest("GET", vmURL, nil)
+	_, body, err := MakeRequest(config, path, "GET", nil, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
-	}
-
-	// Add API token header
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-
-	// Send request
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get proxmox resources: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read proxmox resource response: %v", err)
+		return nil, fmt.Errorf("proxmox cluster resource request failed: %v", err)
 	}
 
 	// Parse response into VMResponse struct
@@ -288,7 +265,7 @@ func PowerOffRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 	// ----- SECURITY CHECK -----
 	// make sure VM is not critical
 
-	criticalMembers, err := getPoolMembers(config, CRITICAL_POOL)
+	criticalMembers, err := GetPoolMembers(config, CRITICAL_POOL)
 	if err != nil {
 		return nil, fmt.Errorf("could not verify members of critical pool: %v", err)
 	}
@@ -298,35 +275,11 @@ func PowerOffRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 		return nil, fmt.Errorf("not authorized to power off VMID %d: %v", vm.VMID, err)
 	}
 
-	// Create HTTP client with SSL verification based on config
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
+	path := fmt.Sprintf("api2/extjs/nodes/%s/qemu/%s/status/shutdown", vm.Node, strconv.Itoa(vm.VMID))
 
-	// Prepare status URL
-	statusURL := fmt.Sprintf("https://%s:%s/api2/extjs/nodes/%s/qemu/%s/status/shutdown", config.Host, config.Port, vm.Node, strconv.Itoa(vm.VMID))
-
-	// Create request
-	req, err := http.NewRequest("POST", statusURL, nil)
+	_, body, err := MakeRequest(config, path, "POST", nil, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
-	}
-
-	// Add Authorization header with API token
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-
-	// Make request
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to shut down VM: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read VM shutdown response: %v", err)
+		return nil, fmt.Errorf("vm power off request failed: %v", err)
 	}
 
 	// Parse response
@@ -340,35 +293,11 @@ func PowerOffRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 
 func StopRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 
-	// Create HTTP client with SSL verification based on config
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
+	path := fmt.Sprintf("api2/extjs/nodes/%s/qemu/%s/status/stop", vm.Node, strconv.Itoa(vm.VMID))
 
-	// Prepare status URL
-	statusURL := fmt.Sprintf("https://%s:%s/api2/extjs/nodes/%s/qemu/%s/status/stop", config.Host, config.Port, vm.Node, strconv.Itoa(vm.VMID))
-
-	// Create request
-	req, err := http.NewRequest("POST", statusURL, nil)
+	_, body, err := MakeRequest(config, path, "POST", nil, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
-	}
-
-	// Add Authorization header with API token
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-
-	// Make request
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to stop VM: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read VM stop response: %v", err)
+		return nil, fmt.Errorf("vm stop request failed: %v", err)
 	}
 
 	// Parse response
@@ -464,7 +393,7 @@ func PowerOnRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 	// ----- SECURITY CHECK -----
 	// make sure VM is not critical
 
-	criticalMembers, err := getPoolMembers(config, CRITICAL_POOL)
+	criticalMembers, err := GetPoolMembers(config, CRITICAL_POOL)
 	if err != nil {
 		return nil, fmt.Errorf("could not verify members of critical pool: %v", err)
 	}
@@ -474,47 +403,24 @@ func PowerOnRequest(config *ProxmoxConfig, vm VM) (*VMPower, error) {
 		return nil, fmt.Errorf("not authorized to power on VMID %d: %v", vm.VMID, err)
 	}
 
-	// Create HTTP client with SSL verification based on config
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
+	path := fmt.Sprintf("api2/extjs/nodes/%s/qemu/%s/status/start", vm.Node, strconv.Itoa(vm.VMID))
 
-	// Prepare status URL
-	startURL := fmt.Sprintf("https://%s:%s/api2/extjs/nodes/%s/qemu/%s/status/start", config.Host, config.Port, vm.Node, strconv.Itoa(vm.VMID))
-
-	// Create request
-	req, err := http.NewRequest("POST", startURL, nil)
+	_, body, err := MakeRequest(config, path, "POST", nil, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
-	}
-
-	// Add Authorization header with API token
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-
-	// Make request
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to turn on VM: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read VM power on response: %v", err)
+		return nil, fmt.Errorf("vm start request failed: %v", err)
 	}
 
 	// Parse response
 	var apiResp VMPower
 	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse VM power on response: %v", err)
+		return nil, fmt.Errorf("failed to parse VM start response: %v", err)
 	}
 
 	return &apiResp, nil
 }
 
-// called by cloning.CloneTemplateToPod to wait for router to finish starting
+// !!! should be refactored to use MakeRequest, written in really stupid way idk why I did this
+// should change MakeRequest to variadic function to avoid recreating http client many times
 func WaitForRunning(config *ProxmoxConfig, vm VM) error {
 	// Create a single HTTP client for all requests
 	tr := &http.Transport{
@@ -568,7 +474,8 @@ func WaitForRunning(config *ProxmoxConfig, vm VM) error {
 	}
 }
 
-// return when vm is "stopped" or on timeout
+// !!! should be refactored to use MakeRequest, written in really stupid way idk why I did this
+// should change MakeRequest to variadic function to avoid recreating http client many times
 func WaitForStopped(config *ProxmoxConfig, vm VM) error {
 	// Create a single HTTP client for all requests
 	tr := &http.Transport{
@@ -633,38 +540,16 @@ func isVmCritical(vm VM, poolMembers *[]VirtualResource) (isInCritical bool, err
 	return false, nil
 }
 
-func getPoolMembers(config *ProxmoxConfig, pool string) (members []VirtualResource, err error) {
-	// Create a single HTTP client for all requests
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
+func GetPoolMembers(config *ProxmoxConfig, pool string) (members []VirtualResource, err error) {
+	path := "api2/json/pools"
 
-	// Wait for status "stopped" with exponential backoff
-	poolURL := fmt.Sprintf("https://%s:%s/api2/json/pools",
-		config.Host, config.Port)
-
-	req, err := http.NewRequest("GET", poolURL, nil)
+	_, body, err := MakeRequest(config, path, "GET", nil, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create pool request: %v", err)
-	}
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get critical pool: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read pool response body: %v", err)
+		return nil, fmt.Errorf("vm stop request failed: %v", err)
 	}
 
-	// Parse
 	var poolResponse PoolResponse
-	err = json.Unmarshal(respBody, &poolResponse)
+	err = json.Unmarshal(body, &poolResponse)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal pool response body: %v", err)
 	}
@@ -676,5 +561,4 @@ func getPoolMembers(config *ProxmoxConfig, pool string) (members []VirtualResour
 	}
 
 	return nil, fmt.Errorf("failed to identify resource pool with id %s", CRITICAL_POOL)
-
 }
