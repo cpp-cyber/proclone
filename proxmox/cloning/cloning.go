@@ -559,7 +559,6 @@ func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid in
 	var err error
 	for {
 		if time.Since(start) > maxWait {
-			log.Printf("HardDisk data: %s", status.Data.HardDisk)
 			return fmt.Errorf("timeout waiting for VM disks to become available")
 		}
 
@@ -584,7 +583,7 @@ func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid in
 		}
 
 		for _, d := range *disks {
-			log.Print(d.Id)
+			log.Printf("%s", d.Id)
 			if d.Id == imageId && d.Used > 0 {
 				return nil
 			}
