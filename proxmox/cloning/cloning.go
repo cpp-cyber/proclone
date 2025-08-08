@@ -555,14 +555,10 @@ func createNewPodPool(username string, newPodID string, templateName string, con
 func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid int, maxWait time.Duration) error {
 	start := time.Now()
 	var status *ConfigResponse
-	var disks *[]Disk
 	var err error
 	for {
 		if time.Since(start) > maxWait {
 			log.Printf("HardDisk data: %s", status.Data.HardDisk)
-			for _, d := range *disks {
-				log.Printf("%s", d.Id)
-			}
 			return fmt.Errorf("timeout waiting for VM disks to become available")
 		}
 
@@ -579,7 +575,7 @@ func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid in
 
 		imageId := strings.Split(status.Data.HardDisk, ",")[0]
 
-		disks, err = getStorageContent(config, node, STORAGE_ID)
+		disks, err := getStorageContent(config, node, STORAGE_ID)
 		if err != nil {
 			time.Sleep(2 * time.Second)
 			continue
