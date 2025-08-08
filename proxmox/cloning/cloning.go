@@ -592,6 +592,7 @@ func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid in
 func getStorageContent(config *proxmox.ProxmoxConfig, node string, storage string) (response *[]Disk, err error) {
 
 	contentPath := fmt.Sprintf("api2/json/nodes/%s/storage/%s/content", node, storage)
+	log.Printf("%s", contentPath)
 
 	statusCode, body, err := proxmox.MakeRequest(config, contentPath, "GET", nil, nil)
 	if err != nil {
