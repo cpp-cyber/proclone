@@ -1,11 +1,8 @@
 package proxmox
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 )
@@ -71,35 +68,13 @@ func LoadProxmoxConfig() (*ProxmoxConfig, error) {
 
 // GetNodeStatus fetches the status of a single Proxmox node
 func GetNodeStatus(config *ProxmoxConfig, nodeName string) (*ProxmoxNodeStatus, error) {
-	// Create HTTP client with SSL verification based on config
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
 
-	// Prepare status URL
-	statusURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/status", config.Host, config.Port, nodeName)
+	// Prepare status endpoint path
+	path := fmt.Sprintf("api2/json/nodes/%s/status", nodeName)
 
-	// Create request
-	req, err := http.NewRequest("GET", statusURL, nil)
+	_, body, err := MakeRequest(config, path, "GET", nil, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
-	}
-
-	// Add Authorization header with API token
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-
-	// Make request
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get node status: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read status response: %v", err)
+		return nil, fmt.Errorf("proxmox node status request failed: %v", err)
 	}
 
 	// Parse response

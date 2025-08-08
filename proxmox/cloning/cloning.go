@@ -1,12 +1,10 @@
 package cloning
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math"
 	"net/http"
@@ -40,6 +38,10 @@ type CloneResponse struct {
 	Success int      `json:"success"`
 	PodName string   `json:"pod_name"`
 	Errors  []string `json:"errors,omitempty"`
+}
+
+type NextIDResponse struct {
+	Data string `json:"data"`
 }
 
 type StorageResponse struct {
@@ -253,47 +255,21 @@ func CloneTemplateToPod(c *gin.Context) {
 
 // assign a user to be a VM user for a resource pool
 func setPoolPermission(config *proxmox.ProxmoxConfig, pool string, user string) error {
-
-	// Create HTTP client with SSL verification based on config
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
-
-	// define proxmox pools endpoint URL
-	accessURL := fmt.Sprintf("https://%s:%s/api2/json/access/acl", config.Host, config.Port)
-
 	// define json data holding new pool name
 	jsonString := fmt.Sprintf("{\"path\":\"/pool/%s\", \"users\":\"%s@SDC\", \"roles\":\"PVEVMUser,PVEPoolUser\", \"propagate\": true }", pool, user)
 	jsonData := []byte(jsonString)
 
-	// Create request
-	req, err := http.NewRequest("PUT", accessURL, bytes.NewBuffer(jsonData))
+	statusCode, _, err := proxmox.MakeRequest(config, "api2/json/access/acl", "PUT", jsonData, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %v", err)
+		return err
 	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	// Make request
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to assign pool permissions for %s: %v", user, err)
+	if statusCode < 200 || statusCode >= 300 {
+		return fmt.Errorf("failed to assign pool permissions, status code: %d", statusCode)
 	}
-	defer resp.Body.Close()
-
 	return nil
 }
 
 func cleanupClone(config *proxmox.ProxmoxConfig, nodeName string, vmid int) error {
-	// Create HTTP client with SSL verification based on config
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
-
 	/*
 	 * ----- IF RUNNING, WAIT FOR VM TO BE TURNED OFF -----
 	 */
@@ -319,34 +295,22 @@ func cleanupClone(config *proxmox.ProxmoxConfig, nodeName string, vmid int) erro
 	 * ----- HANDLE DELETING VM -----
 	 */
 
-	// Prepare delete URL
-	deleteURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d",
-		config.Host, config.Port, nodeName, vmid)
+	// Prepare request path
+	path := fmt.Sprintf("api2/json/nodes/%s/qemu/%d", nodeName, vmid)
 
-	// Create request
-	req, err := http.NewRequest("DELETE", deleteURL, nil)
+	statusCode, body, err := proxmox.MakeRequest(config, path, "DELETE", nil, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create cleanup request: %v", err)
+		return fmt.Errorf("vm delete request failed: %v", err)
 	}
 
-	// Add headers
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-
-	// Make request
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to cleanup VM: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+	if statusCode != http.StatusOK {
 		return fmt.Errorf("failed to cleanup VM: %s", string(body))
 	}
 
 	return nil
 }
 
+// !! Need to refactor to use MakeRequest, idk why I wrote it like this :(
 func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool string) (newVm *proxmox.VM, err error) {
 	// Create a single HTTP client for all requests
 	tr := &http.Transport{
@@ -359,7 +323,6 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 		return nil, err
 	}
 
-	// Wait for clone completion with exponential backoff
 	statusURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/status/current",
 		config.Host, config.Port, bestNode, newVMID)
 
@@ -439,15 +402,8 @@ func cloneVM(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool 
 }
 
 func makeCloneRequest(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource, newPool string) (node string, vmid int, err error) {
-	// Create a single HTTP client for all requests
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
 
-	// set mutex lock
-	// this lock is to prevent race conditions where multiple clone requests close
-	// together may try to use the same vmid and fail
+	// lock VMID to prevent race conditions
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -459,74 +415,50 @@ func makeCloneRequest(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource,
 	defer lock.Release(ctx)
 
 	// Get next available VMID
-	nextIDURL := fmt.Sprintf("https://%s:%s/api2/json/cluster/nextid", config.Host, config.Port)
-	req, err := http.NewRequest("GET", nextIDURL, nil)
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to create VMID request: %v", err)
-	}
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-
-	resp, err := client.Do(req)
+	statusCode, body, err := proxmox.MakeRequest(config, "api2/json/cluster/nextid", "GET", nil, nil)
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to get next VMID: %v", err)
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+	if statusCode != http.StatusOK {
 		return "", 0, fmt.Errorf("failed to get next VMID: %s", string(body))
 	}
 
-	var nextIDResponse struct {
-		Data string `json:"data"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&nextIDResponse); err != nil {
+	var nextID NextIDResponse
+	if err := json.Unmarshal(body, &nextID); err != nil {
 		return "", 0, fmt.Errorf("failed to decode VMID response: %v", err)
 	}
 
-	newVMID, err := strconv.Atoi(nextIDResponse.Data)
+	newVMID, err := strconv.Atoi(nextID.Data)
 	if err != nil {
 		return "", 0, fmt.Errorf("invalid VMID received: %v", err)
 	}
 
-	// Prepare clone request
-	cloneURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/qemu/%d/clone",
-		config.Host, config.Port, vm.NodeName, vm.VmId)
-
-	// Find most optimal compute node for clone
+	// find optimal node
 	bestNode, err := findBestNode(config)
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to calculate optimal compuet node: %v", err)
+		return "", 0, fmt.Errorf("failed to calculate optimal compute node: %v", err)
 	}
 
-	body := map[string]interface{}{
+	// clone VM
+	cloneBody := map[string]interface{}{
 		"newid":  newVMID,
 		"name":   fmt.Sprintf("%s-clone", vm.Name),
 		"pool":   newPool,
 		"target": bestNode,
 	}
 
-	jsonBody, err := json.Marshal(body)
+	jsonBody, err := json.Marshal(cloneBody)
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to create request body: %v", err)
 	}
 
-	req, err = http.NewRequest("POST", cloneURL, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to create clone request: %v", err)
-	}
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err = client.Do(req)
+	clonePath := fmt.Sprintf("api2/json/nodes/%s/qemu/%d/clone", vm.NodeName, vm.VmId)
+	statusCode, body, err = proxmox.MakeRequest(config, clonePath, "POST", jsonBody, nil)
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to clone VM: %v", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+	if statusCode != http.StatusOK {
 		return "", 0, fmt.Errorf("failed to clone VM: %s", string(body))
 	}
 
@@ -583,37 +515,15 @@ func nextPodID(config *proxmox.ProxmoxConfig, c *gin.Context) (string, int, erro
 }
 
 func cleanupFailedPodPool(config *proxmox.ProxmoxConfig, poolName string) error {
-	// Create HTTP client with SSL verification based on config
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
+	poolDeletePath := fmt.Sprintf("api2/json/pools/%s", poolName)
 
-	// Prepare delete URL
-	// define proxmox pools endpoint URL
-	poolDeleteURL := fmt.Sprintf("https://%s:%s/api2/json/pools/%s", config.Host, config.Port, poolName)
-
-	// Create request
-	req, err := http.NewRequest("DELETE", poolDeleteURL, nil)
+	statusCode, body, err := proxmox.MakeRequest(config, poolDeletePath, "DELETE", nil, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create pool cleanup request: %v", err)
+		return fmt.Errorf("pool delete request failed: %v", err)
 	}
 
-	// Add headers
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	// Make request
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to cleanup pool: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to cleanup pool: %s", string(body))
+	if statusCode != http.StatusOK {
+		return fmt.Errorf("pool delete request failed: %s", string(body))
 	}
 
 	return nil
@@ -622,40 +532,15 @@ func cleanupFailedPodPool(config *proxmox.ProxmoxConfig, poolName string) error 
 func createNewPodPool(username string, newPodID string, templateName string, config *proxmox.ProxmoxConfig) (string, error) {
 	newPoolName := newPodID + "_" + templateName + "_" + username
 
-	// Create HTTP client with SSL verification based on config
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
-
-	// define proxmox pools endpoint URL
-	poolURL := fmt.Sprintf("https://%s:%s/api2/extjs/pools", config.Host, config.Port)
+	poolPath := "api2/extjs/pools"
 
 	// define json data holding new pool name
 	jsonString := fmt.Sprintf("{\"poolid\":\"%s\"}", newPoolName)
 	jsonData := []byte(jsonString)
 
-	// Create request
-	req, err := http.NewRequest("POST", poolURL, bytes.NewBuffer(jsonData))
+	_, body, err := proxmox.MakeRequest(config, poolPath, "POST", jsonData, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %v", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	// Make request
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to create new pool: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read VM shutdown response: %v", err)
+		return "", fmt.Errorf("pool create request failed: %v", err)
 	}
 
 	// Parse response
@@ -704,37 +589,14 @@ func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid in
 }
 
 func getStorageContent(config *proxmox.ProxmoxConfig, node string, storage string) (response *[]Disk, err error) {
-	// Create HTTP client with SSL verification based on config
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
 
-	contentURL := fmt.Sprintf("https://%s:%s/api2/json/nodes/%s/storage/%s/content", config.Host, config.Port, node, storage)
+	contentPath := fmt.Sprintf("api2/json/nodes/%s/storage/%s/content", node, storage)
 
-	// Create request
-	req, err := http.NewRequest("GET", contentURL, nil)
+	_, body, err := proxmox.MakeRequest(config, contentPath, "GET", nil, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
+		return nil, fmt.Errorf("%s storage content request failed: %v", node, err)
 	}
 
-	// Add API token header
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-
-	// Send request
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get storage content: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read storage content response: %v", err)
-	}
-
-	// Parse response into StorageResponse struct
 	var apiResp StorageResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to parse storage content response: %v", err)
