@@ -564,12 +564,10 @@ func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid in
 
 		status, err = getVMConfig(config, node, vmid)
 		if err != nil {
-			time.Sleep(2 * time.Second)
 			continue
 		}
 
 		if status.Data.HardDisk == "" {
-			time.Sleep(2 * time.Second)
 			continue
 		}
 
@@ -577,13 +575,11 @@ func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid in
 
 		disks, err = getStorageContent(config, node, STORAGE_ID)
 		if err != nil {
-			time.Sleep(2 * time.Second)
 			log.Printf("%v", err)
 			continue
 		}
 
 		for _, d := range *disks {
-			log.Printf("%s", d.Id)
 			if d.Id == imageId && d.Used > 0 {
 				return nil
 			}
@@ -597,9 +593,13 @@ func getStorageContent(config *proxmox.ProxmoxConfig, node string, storage strin
 
 	contentPath := fmt.Sprintf("api2/json/nodes/%s/storage/%s/content", node, storage)
 
-	_, body, err := proxmox.MakeRequest(config, contentPath, "GET", nil, nil)
+	statusCode, body, err := proxmox.MakeRequest(config, contentPath, "GET", nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%s storage content request failed: %v", node, err)
+	}
+
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("storage content request failed: %s", string(body))
 	}
 
 	var apiResp StorageResponse
