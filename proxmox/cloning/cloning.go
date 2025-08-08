@@ -11,7 +11,6 @@ import (
 	"os"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/P-E-D-L/proclone/auth"
@@ -555,9 +554,9 @@ func createNewPodPool(username string, newPodID string, templateName string, con
 func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid int, maxWait time.Duration) error {
 	start := time.Now()
 	var status *ConfigResponse
-	var disks *[]Disk
 	var err error
 	for {
+		time.Sleep(2 * time.Second)
 		if time.Since(start) > maxWait {
 			return fmt.Errorf("timeout waiting for VM disks to become available")
 		}
@@ -569,11 +568,14 @@ func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid in
 
 		if status.Data.HardDisk == "" {
 			continue
+		} else {
+			time.Sleep(5 * time.Second)
+			return nil
 		}
 
-		imageId := strings.Split(status.Data.HardDisk, ",")[0]
+		/*imageId := strings.Split(status.Data.HardDisk, ",")[0]
 
-		disks, err = getStorageContent(config, node, STORAGE_ID)
+		disks, err := getStorageContent(config, node, STORAGE_ID)
 		if err != nil {
 			log.Printf("%v", err)
 			continue
@@ -583,12 +585,11 @@ func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid in
 			if d.Id == imageId && d.Used > 0 {
 				return nil
 			}
-		}
-
-		time.Sleep(2 * time.Second)
+		} */
 	}
 }
 
+/*
 func getStorageContent(config *proxmox.ProxmoxConfig, node string, storage string) (response *[]Disk, err error) {
 
 	contentPath := fmt.Sprintf("api2/json/nodes/%s/storage/%s/content", node, storage)
@@ -610,3 +611,4 @@ func getStorageContent(config *proxmox.ProxmoxConfig, node string, storage strin
 
 	return &apiResp.Data, nil
 }
+*/
