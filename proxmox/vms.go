@@ -543,10 +543,15 @@ func isVmCritical(vm VM, poolMembers *[]VirtualResource) (isInCritical bool, err
 func GetPoolMembers(config *ProxmoxConfig, pool string) (members []VirtualResource, err error) {
 	path := "api2/json/pools"
 
-	_, body, err := MakeRequest(config, path, "GET", nil, nil)
-	if err != nil {
-		return nil, fmt.Errorf("vm stop request failed: %v", err)
+	statusCode, body, err := MakeRequest(config, path, "GET", nil, nil)
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("request to get pools failed: %s", string(body))
 	}
+	if err != nil {
+		return nil, fmt.Errorf("request to get pools failed: %v", err)
+	}
+
+	log.Printf("pools: %s", string(body))
 
 	var poolResponse PoolResponse
 	err = json.Unmarshal(body, &poolResponse)

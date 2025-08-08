@@ -28,7 +28,7 @@ func MakeRequest(config *ProxmoxConfig, path string, kind string, jsonData []byt
 
 	var bodyReader io.Reader = nil
 
-	if kind != "GET" && kind != "DELETE" && jsonData != nil {
+	if jsonData != nil {
 		bodyReader = bytes.NewBuffer(jsonData)
 	}
 
@@ -37,7 +37,7 @@ func MakeRequest(config *ProxmoxConfig, path string, kind string, jsonData []byt
 		return 0, nil, fmt.Errorf("failed to create %s request: %v", kind, err)
 	}
 
-	if kind != "GET" && kind != "DELETE" && jsonData != nil {
+	if jsonData != nil {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
 	}
