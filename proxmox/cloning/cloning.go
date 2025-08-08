@@ -194,7 +194,7 @@ func CloneTemplateToPod(c *gin.Context) {
 	}
 
 	// Turn on router
-	err = waitForDiskAvailability(config, newRouter.Node, newRouter.VMID, 15*time.Second)
+	err = waitForDiskAvailability(config, newRouter.Node, newRouter.VMID, 30*time.Second)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("router disk unavailable: %v", err))
 	}
