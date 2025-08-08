@@ -14,14 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type PoolResponse struct {
-	Data PoolMembers `json:"data"`
-}
-
-type PoolMembers struct {
-	Members []proxmox.VirtualResource `json:"members"`
-}
-
 type DeleteRequest struct {
 	PodName string `json:"pod_id"` // full pod name i.e. 1015_Some_Template_Administrator
 }

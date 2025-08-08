@@ -235,7 +235,7 @@ func setPodVnet(config *proxmox.ProxmoxConfig, podName string, vnet string) erro
 		return fmt.Errorf("failed to get pod pool: %v", err)
 	}
 
-	var apiResp PoolResponse
+	var apiResp proxmox.PoolResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return fmt.Errorf("failed to parse pool response: %v", err)
 	}

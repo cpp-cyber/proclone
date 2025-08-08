@@ -59,7 +59,7 @@ type VMPowerResponse struct {
 }
 
 type PoolResponse struct {
-	Data []Pool `json:"data"`
+	Data Pool `json:"data"`
 }
 
 type Pool struct {
@@ -541,29 +541,20 @@ func isVmCritical(vm VM, poolMembers *[]VirtualResource) (isInCritical bool, err
 }
 
 func GetPoolMembers(config *ProxmoxConfig, pool string) (members []VirtualResource, err error) {
-	path := "api2/json/pools"
+	// Prepare proxmox pool get URL
+	poolPath := fmt.Sprintf("api2/json/pools/%s", pool)
 
-	statusCode, body, err := MakeRequest(config, path, "GET", nil, nil)
-	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("request to get pools failed: %s", string(body))
-	}
+	_, body, err := MakeRequest(config, poolPath, "GET", nil, nil)
 	if err != nil {
-		return nil, fmt.Errorf("request to get pools failed: %v", err)
+		return nil, fmt.Errorf("failed to request resource pool: %v", err)
 	}
 
-	log.Printf("pools: %s", string(body))
-
-	var poolResponse PoolResponse
-	err = json.Unmarshal(body, &poolResponse)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal pool response body: %v", err)
+	// Parse response into VMResponse struct
+	var apiResp PoolResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse status response: %v", err)
 	}
 
-	for _, responsePool := range poolResponse.Data {
-		if responsePool.Poolid == pool {
-			return responsePool.Members, nil
-		}
-	}
-
-	return nil, fmt.Errorf("failed to identify resource pool with id %s", CRITICAL_POOL)
+	// return array of resource pool members
+	return apiResp.Data.Members, nil
 }
