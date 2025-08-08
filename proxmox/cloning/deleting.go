@@ -1,10 +1,7 @@
 package cloning
 
 import (
-	"crypto/tls"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math"
 	"net/http"
@@ -115,7 +112,7 @@ func DeletePod(c *gin.Context) {
 	}
 
 	// Find all vms in resource pool
-	podVMs, err := getPoolMembers(config, req.PodName)
+	podVMs, err := proxmox.GetPoolMembers(config, req.PodName)
 
 	if err != nil {
 		log.Printf("attempted to enumerate pod %s members, but error: %v", req.PodName, err)
@@ -180,7 +177,7 @@ func waitForEmptyPool(config *proxmox.ProxmoxConfig, poolid string) error {
 		if time.Since(startTime) > timeout {
 			return fmt.Errorf("failed to delete all resource pool members: timeout")
 		} else {
-			poolMembers, err := getPoolMembers(config, poolid)
+			poolMembers, err := proxmox.GetPoolMembers(config, poolid)
 
 			if err != nil {
 				return fmt.Errorf("failed to get resource pool members: %v", err)
@@ -194,48 +191,4 @@ func waitForEmptyPool(config *proxmox.ProxmoxConfig, poolid string) error {
 			backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
 		}
 	}
-}
-
-func getPoolMembers(config *proxmox.ProxmoxConfig, poolid string) ([]proxmox.VirtualResource, error) {
-	// Create HTTP client with SSL verification based on config
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !config.VerifySSL},
-	}
-	client := &http.Client{Transport: tr}
-
-	// Prepare proxmox pool get URL
-	poolGetURL := fmt.Sprintf("https://%s:%s/api2/json/pools/%s", config.Host, config.Port, poolid)
-
-	// Create request
-	req, err := http.NewRequest("GET", poolGetURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create pool get request: %v", err)
-	}
-
-	// Add headers
-	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s", config.APIToken))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	// Make request
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get resource pool data: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read resource pool response: %v", err)
-	}
-
-	// Parse response into VMResponse struct
-	var apiResp PoolResponse
-	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse status response: %v", err)
-	}
-
-	// return array of resource pool members
-	return apiResp.Data.Members, nil
 }
