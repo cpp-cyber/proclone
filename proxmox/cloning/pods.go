@@ -13,11 +13,57 @@ import (
 )
 
 type PodResponse struct {
-	Pods []Pod `json:"templates"`
+	Pods []PodWithVMs `json:"pods"`
 }
 
-type Pod struct {
-	Name string `json:"name"`
+type PodWithVMs struct {
+	Name string                    `json:"name"`
+	VMs  []proxmox.VirtualResource `json:"vms"`
+}
+
+// helper function that builds a maps pod names to their VMs based on the provided regex pattern
+func buildPodResponse(config *proxmox.ProxmoxConfig, regexPattern string) (*PodResponse, error) {
+	// get all virtual resources from proxmox
+	apiResp, err := proxmox.GetVirtualResources(config)
+
+	// if error, return error
+	if err != nil {
+		return nil, err
+	}
+
+	// map pod pools to their VMs
+	resources := apiResp
+	podMap := make(map[string]*PodWithVMs)
+	reg := regexp.MustCompile(regexPattern)
+
+	// first pass: find all pools that are pods
+	for _, r := range *resources {
+		if r.Type == "pool" && reg.MatchString(r.ResourcePool) {
+			name := r.ResourcePool
+			podMap[name] = &PodWithVMs{
+				Name: name,
+				VMs:  []proxmox.VirtualResource{},
+			}
+		}
+	}
+
+	// second pass: map VMs to their pod pool
+	for _, r := range *resources {
+		if r.Type == "qemu" && reg.MatchString(r.ResourcePool) {
+			name := r.ResourcePool
+			if pod, ok := podMap[name]; ok {
+				pod.VMs = append(pod.VMs, r)
+			}
+		}
+	}
+
+	// build response
+	var podResponse PodResponse
+	for _, pod := range podMap {
+		podResponse.Pods = append(podResponse.Pods, *pod)
+	}
+
+	return &podResponse, nil
 }
 
 /*
@@ -63,7 +109,7 @@ func GetPods(c *gin.Context) {
 	var error error
 
 	// get Pod list and assign response
-	podResponse, error = getPodResponse(config)
+	podResponse, error = getAdminPodResponse(config)
 
 	// if error, return error status
 	if error != nil {
@@ -78,31 +124,8 @@ func GetPods(c *gin.Context) {
 	c.JSON(http.StatusOK, podResponse)
 }
 
-func getPodResponse(config *proxmox.ProxmoxConfig) (*PodResponse, error) {
-
-	// get all virtual resources from proxmox
-	apiResp, err := proxmox.GetVirtualResources(config)
-
-	// if error, return error
-	if err != nil {
-		return nil, err
-	}
-
-	// Extract pod templates from response, store in templates array
-	var podResponse PodResponse
-	for _, r := range *apiResp {
-		if r.Type == "pool" {
-			reg, _ := regexp.Compile("1[0-9][0-9][0-9]_.*")
-			if reg.MatchString(r.ResourcePool) {
-				var temp Pod
-				// remove kamino_template_ label when assigning the name to be returned to user
-				temp.Name = r.ResourcePool
-				podResponse.Pods = append(podResponse.Pods, temp)
-			}
-		}
-	}
-
-	return &podResponse, nil
+func getAdminPodResponse(config *proxmox.ProxmoxConfig) (*PodResponse, error) {
+	return buildPodResponse(config, `1[0-9]{3}_.*`)
 }
 
 /*
@@ -164,28 +187,5 @@ func GetUserPods(c *gin.Context) {
 }
 
 func getUserPodResponse(user string, config *proxmox.ProxmoxConfig) (*PodResponse, error) {
-
-	// get all virtual resources from proxmox
-	apiResp, err := proxmox.GetVirtualResources(config)
-
-	// if error, return error
-	if err != nil {
-		return nil, err
-	}
-
-	// Extract pod templates from response, store in templates array
-	var podResponse PodResponse
-	for _, r := range *apiResp {
-		if r.Type == "pool" {
-			reg, _ := regexp.Compile(fmt.Sprintf("1[0-9][0-9][0-9]_.*_%s", user))
-			if reg.MatchString(r.ResourcePool) {
-				var temp Pod
-				// remove kamino_template_ label when assigning the name to be returned to user
-				temp.Name = r.ResourcePool
-				podResponse.Pods = append(podResponse.Pods, temp)
-			}
-		}
-	}
-
-	return &podResponse, nil
+	return buildPodResponse(config, fmt.Sprintf(`1[0-9]{3}_.*_%s`, user))
 }

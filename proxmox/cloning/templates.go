@@ -13,11 +13,13 @@ import (
 )
 
 type TemplateResponse struct {
-	Templates []Template `json:"templates"`
+	Templates []TemplateWithVMs `json:"templates"`
 }
 
-type Template struct {
-	Name string `json:"name"`
+type TemplateWithVMs struct {
+	Name        string                    `json:"name"`
+	Deployments int                       `json:"deployments"`
+	VMs         []proxmox.VirtualResource `json:"vms"`
 }
 
 /*
@@ -56,48 +58,58 @@ func GetAvailableTemplates(c *gin.Context) {
 		return
 	}
 
-	// fetch template reponse
-	var templateResponse *TemplateResponse
-	var error error
-
-	// get Template list and assign response
-	templateResponse, error = getTemplateResponse(config)
-
-	// if error, return error status
-	if error != nil {
+	// fetch template response
+	templateResponse, err := getTemplateResponse(config)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to fetch template list from proxmox cluster",
-			"details": error,
+			"details": err,
 		})
 		return
 	}
 
-	log.Printf("Successfully fetched teamplate list for user %s", username)
+	log.Printf("Successfully fetched template list for user %s", username)
 	c.JSON(http.StatusOK, templateResponse)
 }
 
 func getTemplateResponse(config *proxmox.ProxmoxConfig) (*TemplateResponse, error) {
 
 	// get all virtual resources from proxmox
-	apiResp, err := proxmox.GetVirtualResources(config)
-
-	// if error, return error
+	resources, err := proxmox.GetVirtualResources(config)
 	if err != nil {
 		return nil, err
 	}
 
-	// Extract pod templates from response, store in templates array
-	var templateResponse TemplateResponse
-	for _, r := range *apiResp {
-		if r.Type == "pool" {
-			reg, _ := regexp.Compile("kamino_template_.*")
-			if reg.MatchString(r.ResourcePool) {
-				var temp Template
-				// remove kamino_template_ label when assigning the name to be returned to user
-				temp.Name = r.ResourcePool[16:]
-				templateResponse.Templates = append(templateResponse.Templates, temp)
+	// map template pools to their VMs
+	templateMap := make(map[string]*TemplateWithVMs)
+	reg := regexp.MustCompile(`kamino_template_.*`)
+
+	// first pass: find all pools that are templates
+	for _, r := range *resources {
+		if r.Type == "pool" && reg.MatchString(r.ResourcePool) {
+			name := r.ResourcePool[16:]
+			templateMap[name] = &TemplateWithVMs{
+				Name:        name,
+				Deployments: 0,
+				VMs:         []proxmox.VirtualResource{},
 			}
 		}
+	}
+
+	// second pass: map VMs to their template pool
+	for _, r := range *resources {
+		if r.Type == "qemu" && reg.MatchString(r.ResourcePool) {
+			name := r.ResourcePool[16:]
+			if template, ok := templateMap[name]; ok {
+				template.VMs = append(template.VMs, r)
+			}
+		}
+	}
+
+	// build response
+	var templateResponse TemplateResponse
+	for _, template := range templateMap {
+		templateResponse.Templates = append(templateResponse.Templates, *template)
 	}
 
 	return &templateResponse, nil
