@@ -67,6 +67,9 @@ func main() {
 	// Proxmox Admin Pod endpoints
 	admin.GET("/proxmox/pods/all", cloning.GetPods)
 
+	// Active Directory User endpoints
+	admin.GET("/users", auth.GetUsers)
+
 	// get port to run server on via. PC_PORT env variable
 	port := os.Getenv("PC_PORT")
 	if port == "" {
