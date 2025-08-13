@@ -4,12 +4,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
-	"github.com/go-ldap/ldap/v3"
 )
 
 // struct to hold username and password received from post request
@@ -35,77 +33,27 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	// LDAP stuff
-	ldapServer := os.Getenv("LDAP_SERVER")
-	baseDN := os.Getenv("LDAP_BASE_DN")
-	bindDN := os.Getenv("LDAP_BIND_DN")
-	bindPassword := os.Getenv("LDAP_BIND_PASSWORD")
-
-	// for deployment debugging purposes
-	if ldapServer == "" || baseDN == "" || bindDN == "" || bindPassword == "" {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "LDAP configuration is missing"})
-		return
-	}
-
-	// connect to LDAP server
-	l, err := ldap.DialURL("ldap://" + ldapServer + ":389")
+	// Connect to LDAP
+	ldapConn, err := ConnectToLDAP()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("LDAP bind to %s failed", ldapServer)})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("LDAP connection failed: %v", err)})
 		return
 	}
+	defer ldapConn.Close()
 
-	// make sure connection closes at function return even if error occurs
-	defer l.Close()
-
-	// First bind as service account
-	err = l.Bind(bindDN, bindPassword)
+	// Authenticate user
+	_, groups, err := ldapConn.AuthenticateUser(username, password)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid ldap service account"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Define search request
-	searchRequest := ldap.NewSearchRequest(
-		baseDN,
-		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
-		fmt.Sprintf("(sAMAccountName=%s)", username),
-		[]string{"dn", "memberOf"},
-		nil,
-	)
+	// Check if user is admin
+	isAdmin := CheckIfAdmin(groups)
 
-	// search for user
-	sr, err := l.Search(searchRequest)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "user not found in LDAP"})
-		return
-	}
-
-	// handle user not found
-	if len(sr.Entries) != 1 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found or multiple users found"})
-		return
-	}
-
-	userDN := sr.Entries[0].DN
-
-	// bind as user to verify password
-	err = l.Bind(userDN, password)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
-		return
-	}
-
-	isAdmin := false
-
-	// check if user is in "Domain Admins"
-	groups := sr.Entries[0].GetAttributeValues("memberOf")
 	log.Println("logging user membership: ", groups)
 	for _, group := range groups {
 		log.Println("User is a member of: ", group)
-		if strings.Contains(strings.ToLower(group), "cn=domain admins") {
-			isAdmin = true
-			break
-		}
 	}
 
 	// create session
@@ -138,8 +86,8 @@ func ProfileHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": username,
-		"isAdmin": isAdmin,
+		"username": username,
+		"isAdmin":  isAdmin,
 	})
 }
 

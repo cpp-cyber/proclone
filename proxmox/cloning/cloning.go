@@ -466,7 +466,7 @@ func makeCloneRequest(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource,
 
 // finds lowest available POD ID between 1001 - 1255
 func nextPodID(config *proxmox.ProxmoxConfig, c *gin.Context) (string, int, error) {
-	podResponse, err := getPodResponse(config)
+	podResponse, err := getAdminPodResponse(config)
 
 	// if error, return error status
 	if err != nil {
