@@ -58,13 +58,21 @@ type VMPowerResponse struct {
 	Success int `json:"success"`
 }
 
+type Pool struct {
+	Poolid  string            `json:"poolid"`
+	Members []VirtualResource `json:"members"`
+}
+
 type PoolResponse struct {
 	Data Pool `json:"data"`
 }
 
-type Pool struct {
-	Poolid  string            `json:"poolid"`
-	Members []VirtualResource `json:"members"`
+type PoolName struct {
+	PoolName string `json:"poolid"`
+}
+
+type PoolNamesResponse struct {
+	Data []PoolName `json:"data"`
 }
 
 /*
@@ -557,4 +565,27 @@ func GetPoolMembers(config *ProxmoxConfig, pool string) (members []VirtualResour
 
 	// return array of resource pool members
 	return apiResp.Data.Members, nil
+}
+
+// Helper function that retrieves all pool names in proxmox
+func GetPoolNames(config *ProxmoxConfig) (pools []string, err error) {
+	// Prepare proxmox pool get URL
+	poolPath := "api2/json/pools"
+
+	_, body, err := MakeRequest(config, poolPath, "GET", nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to request resource pools: %v", err)
+	}
+
+	// Parse response into PoolsResponse struct
+	var apiResp PoolNamesResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse status response: %v", err)
+	}
+
+	// return array of resource pool names
+	for _, pool := range apiResp.Data {
+		pools = append(pools, pool.PoolName)
+	}
+	return pools, nil
 }

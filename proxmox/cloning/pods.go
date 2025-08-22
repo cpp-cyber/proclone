@@ -104,7 +104,7 @@ func GetPods(c *gin.Context) {
 		return
 	}
 
-	// fetch template reponse
+	// fetch pod response
 	var podResponse *PodResponse
 	var error error
 

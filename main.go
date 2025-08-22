@@ -5,8 +5,10 @@ import (
 	"os"
 
 	"github.com/P-E-D-L/proclone/auth"
+	"github.com/P-E-D-L/proclone/database"
 	"github.com/P-E-D-L/proclone/proxmox"
 	"github.com/P-E-D-L/proclone/proxmox/cloning"
+	"github.com/P-E-D-L/proclone/proxmox/images"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
@@ -19,7 +21,19 @@ func init() {
 }
 
 func main() {
+	// Ensure upload directory exists
+	if err := os.MkdirAll(images.UploadDir, os.ModePerm); err != nil {
+		log.Fatalf("failed to create upload dir: %v", err)
+	}
+
+	// Initialize database connection
+	if err := database.InitializeDB(); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer database.CloseDB()
+
 	r := gin.Default()
+	r.MaxMultipartMemory = 10 << 20 // 10 MiB
 
 	// store session cookie
 	// **IN PROD USE REAL SECURE KEY**
@@ -46,6 +60,7 @@ func main() {
 
 	// Proxmox User Template endpoints
 	user.GET("/proxmox/templates", cloning.GetAvailableTemplates)
+	user.GET("/proxmox/templates/images/:filename", images.HandleGetFile)
 	user.POST("/proxmox/templates/clone", cloning.CloneTemplateToPod)
 	user.POST("/proxmox/pods/delete", cloning.DeletePod)
 
@@ -66,6 +81,14 @@ func main() {
 
 	// Proxmox Admin Pod endpoints
 	admin.GET("/proxmox/pods/all", cloning.GetPods)
+
+	// Proxmox Admin Template endpoints
+	admin.POST("/proxmox/templates/publish", cloning.PublishTemplate)
+	admin.POST("/proxmox/templates/update", cloning.UpdateTemplate)
+	admin.GET("/proxmox/templates", cloning.GetAllTemplates)
+	admin.GET("/proxmox/templates/unpublished", cloning.GetUnpublishedTemplates)
+	admin.POST("/proxmox/templates/toggle", cloning.ToggleTemplateVisibility)
+	admin.POST("/proxmox/templates/image/upload", images.HandleUpload)
 
 	// Active Directory User endpoints
 	admin.GET("/users", auth.GetUsers)

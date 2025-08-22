@@ -1,40 +1,139 @@
 package cloning
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"regexp"
+	"strings"
+
+	"slices"
 
 	"github.com/P-E-D-L/proclone/auth"
+	"github.com/P-E-D-L/proclone/database"
 	"github.com/P-E-D-L/proclone/proxmox"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
-type TemplateResponse struct {
-	Templates []TemplateWithVMs `json:"templates"`
+type ProxmoxPool struct {
+	PoolID string `json:"poolid"`
 }
 
-type TemplateWithVMs struct {
-	Name        string                    `json:"name"`
-	Deployments int                       `json:"deployments"`
-	VMs         []proxmox.VirtualResource `json:"vms"`
+type TemplateResponse struct {
+	Templates []database.Template `json:"templates"`
+}
+
+type ProxmoxPoolResponse struct {
+	Pools []ProxmoxPool `json:"pools"`
+}
+
+type UnpublishedTemplateResponse struct {
+	Templates []UnpublishedTemplate `json:"templates"`
+}
+
+type UnpublishedTemplate struct {
+	Name string `json:"name"`
 }
 
 /*
- * ===== GET ALL CURRENT POD TEMPLATES =====
+ * /api/proxmox/templates
+ * Returns a list of templates based on their current visibility
  */
 func GetAvailableTemplates(c *gin.Context) {
 	session := sessions.Default(c)
 	username := session.Get("username")
 
-	// Make sure user is authenticated (redundant)
+	// Make sure user is authenticated
 	isAuth, _ := auth.IsAuthenticated(c)
 	if !isAuth {
 		log.Printf("Unauthorized access attempt")
 		c.JSON(http.StatusForbidden, gin.H{
-			"error": "Only authenticated users can access template data",
+			"error": "Only authenticated users can access templates",
+		})
+		return
+	}
+
+	// fetch template response from database
+	templates, err := database.SelectVisibleTemplates()
+	if err != nil {
+		log.Printf("Database error for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to fetch templates from database: %v", err),
+		})
+		return
+	}
+
+	// convert templates to response format
+	templatesResponse, err := BuildTemplatesResponse(templates)
+	if err != nil {
+		log.Printf("Failed to get available templates response for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to process templates: %v", err),
+		})
+		return
+	}
+
+	log.Printf("Successfully fetched %d templates for user %s", len(templates), username)
+	c.JSON(http.StatusOK, templatesResponse)
+}
+
+/*
+ * /api/admin/proxmox/templates
+ * Returns a list of all templates
+ */
+func GetAllTemplates(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("username")
+	isAdmin := session.Get("is_admin")
+
+	// Make sure user is admin
+	if !isAdmin.(bool) {
+		log.Printf("Forbidden access attempt")
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Only Admin users can create a template",
+		})
+		return
+	}
+
+	// fetch template response from database
+	templates, err := database.SelectAllTemplates()
+	if err != nil {
+		log.Printf("Database error for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to fetch templates from database: %v", err),
+		})
+		return
+	}
+
+	// convert templates to response format
+	templatesResponse, err := BuildTemplatesResponse(templates)
+	if err != nil {
+		log.Printf("Failed to get available templates response for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to process templates: %v", err),
+		})
+		return
+	}
+
+	log.Printf("Successfully fetched %d templates for user %s", len(templates), username)
+	c.JSON(http.StatusOK, templatesResponse)
+}
+
+func BuildTemplatesResponse(templates []database.Template) (TemplateResponse, error) {
+	return TemplateResponse{Templates: templates}, nil
+}
+
+func GetUnpublishedTemplates(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("username")
+	isAdmin := session.Get("is_admin")
+
+	// Make sure user is admin (redundant)
+	if !isAdmin.(bool) {
+		log.Printf("Forbidden access attempt")
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Only Admin users can create a template",
 		})
 		return
 	}
@@ -51,66 +150,230 @@ func GetAvailableTemplates(c *gin.Context) {
 		return
 	}
 
-	// If no proxmox host specified, return empty repsonse
+	// If no proxmox host specified, return empty response
 	if config.Host == "" {
 		log.Printf("No proxmox server configured")
-		c.JSON(http.StatusOK, proxmox.VirtualMachineResponse{VirtualMachines: []proxmox.VirtualResource{}})
+		c.JSON(http.StatusOK, UnpublishedTemplateResponse{Templates: []UnpublishedTemplate{}})
 		return
 	}
 
-	// fetch template response
-	templateResponse, err := getTemplateResponse(config)
+	// Get all Kamino templates from Proxmox
+	allKaminoTemplates, err := getAllKaminoTemplateNames(config)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to fetch template list from proxmox cluster",
+			"error":   "Failed to fetch pool list from proxmox cluster",
 			"details": err,
 		})
 		return
 	}
 
-	log.Printf("Successfully fetched template list for user %s", username)
-	c.JSON(http.StatusOK, templateResponse)
+	// Get published template names from database
+	publishedTemplateNames, err := database.SelectAllTemplateNames()
+	if err != nil {
+		log.Printf("Database error for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to fetch published templates from database: %v", err),
+		})
+		return
+	}
+
+	// Get unpublished templates (templates in Proxmox but not in database)
+	unpublishedTemplates := getUnpublishedTemplateNames(allKaminoTemplates, publishedTemplateNames)
+
+	log.Printf("Successfully fetched unpublished template list for admin user %s", username)
+	c.JSON(http.StatusOK, UnpublishedTemplateResponse{Templates: unpublishedTemplates})
 }
 
-func getTemplateResponse(config *proxmox.ProxmoxConfig) (*TemplateResponse, error) {
-
-	// get all virtual resources from proxmox
-	resources, err := proxmox.GetVirtualResources(config)
+func getAllKaminoTemplateNames(config *proxmox.ProxmoxConfig) (*ProxmoxPoolResponse, error) {
+	// Fetch pools from Proxmox API
+	statusCode, body, err := proxmox.MakeRequest(config, "api2/json/pools", "GET", nil, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch pools from Proxmox: %v", err)
 	}
 
-	// map template pools to their VMs
-	templateMap := make(map[string]*TemplateWithVMs)
-	reg := regexp.MustCompile(`kamino_template_.*`)
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("proxmox API returned status %d", statusCode)
+	}
 
-	// first pass: find all pools that are templates
-	for _, r := range *resources {
-		if r.Type == "pool" && reg.MatchString(r.ResourcePool) {
-			name := r.ResourcePool[16:]
-			templateMap[name] = &TemplateWithVMs{
-				Name:        name,
-				Deployments: 0,
-				VMs:         []proxmox.VirtualResource{},
-			}
+	// Parse the response
+	var apiResp proxmox.ProxmoxAPIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse pools response: %v", err)
+	}
+
+	// Parse the pools data
+	var pools []ProxmoxPool
+	if err := json.Unmarshal(apiResp.Data, &pools); err != nil {
+		return nil, fmt.Errorf("failed to extract pools from response: %v", err)
+	}
+
+	// Filter pools that start with "kamino_template_"
+	var templatePools []ProxmoxPool
+	for _, pool := range pools {
+		if strings.HasPrefix(pool.PoolID, "kamino_template_") {
+			templatePools = append(templatePools, pool)
 		}
 	}
 
-	// second pass: map VMs to their template pool
-	for _, r := range *resources {
-		if r.Type == "qemu" && reg.MatchString(r.ResourcePool) {
-			name := r.ResourcePool[16:]
-			if template, ok := templateMap[name]; ok {
-				template.VMs = append(template.VMs, r)
-			}
+	return &ProxmoxPoolResponse{Pools: templatePools}, nil
+}
+
+func GetUnpublishedTemplatesResponse(allKaminoTemplates *ProxmoxPoolResponse, publishedTemplateNames []string) (*ProxmoxPoolResponse, error) {
+	var unpublishedPools []ProxmoxPool
+
+	for _, pool := range allKaminoTemplates.Pools {
+		if !slices.Contains(publishedTemplateNames, pool.PoolID) {
+			unpublishedPools = append(unpublishedPools, pool)
 		}
 	}
 
-	// build response
-	var templateResponse TemplateResponse
-	for _, template := range templateMap {
-		templateResponse.Templates = append(templateResponse.Templates, *template)
+	return &ProxmoxPoolResponse{Pools: unpublishedPools}, nil
+}
+
+// getUnpublishedTemplateNames returns a list of template names that are in Proxmox but not published in the database
+func getUnpublishedTemplateNames(allKaminoTemplates *ProxmoxPoolResponse, publishedTemplateNames []string) []UnpublishedTemplate {
+	var unpublishedTemplates []UnpublishedTemplate
+
+	for _, pool := range allKaminoTemplates.Pools {
+		// Remove the "kamino_template_" prefix to get the actual template name
+		templateName := strings.TrimPrefix(pool.PoolID, "kamino_template_")
+
+		// Check if this template name is not in the published list
+		if !slices.Contains(publishedTemplateNames, templateName) {
+			unpublishedTemplates = append(unpublishedTemplates, UnpublishedTemplate{
+				Name: templateName,
+			})
+		}
 	}
 
-	return &templateResponse, nil
+	return unpublishedTemplates
+}
+
+/*
+ * /api/admin/proxmox/templates/publish
+ * This function publishes a template that is on proxmox
+ */
+func PublishTemplate(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("username")
+	isAdmin := session.Get("is_admin")
+
+	// Make sure user is authenticated (redundant)
+	if !isAdmin.(bool) {
+		log.Printf("Forbidden access attempt")
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Only Admin users can create a template",
+		})
+		return
+	}
+
+	var template database.Template
+	if err := c.ShouldBindJSON(&template); err != nil {
+		log.Printf("Failed to bind JSON for user %s: %v", username, err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request payload",
+		})
+		return
+	}
+
+	// Insert the new template into the database
+	if err := database.InsertTemplate(template); err != nil {
+		log.Printf("Database error for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to create template: %v", err),
+		})
+		return
+	}
+
+	log.Printf("Successfully created template %s for admin user %s", template.Name, username)
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Template created successfully",
+	})
+}
+
+/*
+ * /api/admin/proxmox/templates/update
+ * This function updates an existing template
+ */
+func UpdateTemplate(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("username")
+	isAdmin := session.Get("is_admin")
+
+	// Make sure user is authenticated and is an admin
+	if !isAdmin.(bool) {
+		log.Printf("Forbidden access attempt")
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Only Admin users can update a template",
+		})
+		return
+	}
+
+	var template database.Template
+	if err := c.ShouldBindJSON(&template); err != nil {
+		log.Printf("Failed to bind JSON for user %s: %v", username, err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request payload",
+		})
+		return
+	}
+
+	// Update the template in the database
+	if err := database.UpdateTemplate(template); err != nil {
+		log.Printf("Database error for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to update template: %v", err),
+		})
+		return
+	}
+
+	log.Printf("Successfully updated template %s for admin user %s", template.Name, username)
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Template updated successfully",
+	})
+}
+
+/*
+ * /api/admin/proxmox/templates/update
+ * This function toggles the visibility of a published template
+ */
+func ToggleTemplateVisibility(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("username")
+	isAdmin := session.Get("is_admin")
+
+	// Make sure user is authenticated and is an admin
+	if !isAdmin.(bool) {
+		log.Printf("Forbidden access attempt")
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Only Admin users can update a template",
+		})
+		return
+	}
+
+	var req struct {
+		TemplateName string `json:"template_name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("Failed to bind JSON for user %s: %v", username, err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request payload",
+		})
+		return
+	}
+	templateName := req.TemplateName
+
+	// Update the template in the database
+	if err := database.ToggleVisibility(templateName); err != nil {
+		log.Printf("Database error for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to update template: %v", err),
+		})
+		return
+	}
+
+	log.Printf("Successfully toggled template visibility %s for admin user %s", templateName, username)
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Template visibility toggled successfully",
+	})
 }
