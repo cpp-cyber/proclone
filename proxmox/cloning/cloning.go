@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/P-E-D-L/proclone/auth"
-	"github.com/P-E-D-L/proclone/proxmox"
-	"github.com/P-E-D-L/proclone/proxmox/cloning/locking"
+	"github.com/cpp-cyber/proclone/auth"
+	"github.com/cpp-cyber/proclone/proxmox"
+	"github.com/cpp-cyber/proclone/proxmox/cloning/locking"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
