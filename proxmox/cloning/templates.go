@@ -9,9 +9,9 @@ import (
 
 	"slices"
 
-	"github.com/cpp-cyber/proclone/auth"
-	"github.com/cpp-cyber/proclone/database"
-	"github.com/cpp-cyber/proclone/proxmox"
+	"github.com/P-E-D-L/proclone/auth"
+	"github.com/P-E-D-L/proclone/database"
+	"github.com/P-E-D-L/proclone/proxmox"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
