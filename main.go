@@ -85,10 +85,12 @@ func main() {
 	// Proxmox Admin Template endpoints
 	admin.POST("/proxmox/templates/publish", cloning.PublishTemplate)
 	admin.POST("/proxmox/templates/update", cloning.UpdateTemplate)
+	admin.POST("/proxmox/templates/delete", cloning.DeleteTemplate)
 	admin.GET("/proxmox/templates", cloning.GetAllTemplates)
 	admin.GET("/proxmox/templates/unpublished", cloning.GetUnpublishedTemplates)
 	admin.POST("/proxmox/templates/toggle", cloning.ToggleTemplateVisibility)
 	admin.POST("/proxmox/templates/image/upload", images.HandleUpload)
+	admin.POST("/proxmox/templates/clone/bulk", cloning.BulkCloneTemplate)
 
 	// Active Directory User endpoints
 	admin.GET("/users", auth.GetUsers)

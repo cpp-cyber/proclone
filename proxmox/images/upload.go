@@ -6,6 +6,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -14,7 +15,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const UploadDir = "./uploads"
+var UploadDir = os.Getenv("UPLOADS_DIR")
 
 // Use a map to define allowed MIME types for better performance
 // and to avoid using a switch statement

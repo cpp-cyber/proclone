@@ -148,7 +148,6 @@ func DeletePod(c *gin.Context) {
 
 	response := DeleteResponse{
 		Success: success,
-		PodName: req.PodName,
 		Errors:  errors,
 	}
 

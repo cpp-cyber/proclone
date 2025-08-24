@@ -143,7 +143,7 @@ func (lc *LDAPConnection) GetAllUsers() (*UserResponse, error) {
 		// check if user is admin
 		isAdmin := false
 		for _, group := range groups {
-			if strings.Contains(strings.ToLower(group), "cn=domain admins") || strings.Contains(strings.ToLower(group), "cn=kamino admin") {
+			if strings.Contains(strings.ToLower(group), "cn=domain admins") || strings.Contains(strings.ToLower(group), "cn=proxmox-admins") {
 				isAdmin = true
 				break
 			}

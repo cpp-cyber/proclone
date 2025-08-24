@@ -116,6 +116,22 @@ func UpdateTemplate(template Template) error {
 	return nil
 }
 
+// Delete template from database
+func DeleteTemplate(templateName string) error {
+	if DB == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
+
+	query := "DELETE FROM templates WHERE name = ?"
+
+	_, err := DB.Exec(query, templateName)
+	if err != nil {
+		return fmt.Errorf("failed to execute query (%s): %w", query, err)
+	}
+
+	return nil
+}
+
 // Helper function to select all template names
 func SelectAllTemplateNames() ([]string, error) {
 	templates, err := SelectAllTemplates()
@@ -131,7 +147,7 @@ func SelectAllTemplateNames() ([]string, error) {
 	return templateNames, nil
 }
 
-// TODO: Implement
+// Adds one to the deployment count of a template
 func AddDeployment(templateName string) error {
 	if DB == nil {
 		return fmt.Errorf("database connection is not initialized")

@@ -14,10 +14,12 @@ import (
 	"time"
 
 	"github.com/P-E-D-L/proclone/auth"
+	"github.com/P-E-D-L/proclone/database"
 	"github.com/P-E-D-L/proclone/proxmox"
 	"github.com/P-E-D-L/proclone/proxmox/cloning/locking"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/sync/errgroup"
 )
 
 const KAMINO_TEMP_POOL string = "0100_Kamino_Templates"
@@ -35,7 +37,6 @@ type NewPoolResponse struct {
 
 type CloneResponse struct {
 	Success int      `json:"success"`
-	PodName string   `json:"pod_name"`
 	Errors  []string `json:"errors,omitempty"`
 }
 
@@ -58,7 +59,6 @@ type Disk struct {
 func CloneTemplateToPod(c *gin.Context) {
 	session := sessions.Default(c)
 	username := session.Get("username")
-	var errors []string
 
 	// Make sure user is authenticated
 	isAuth, _ := auth.IsAuthenticated(c)
@@ -80,176 +80,19 @@ func CloneTemplateToPod(c *gin.Context) {
 		return
 	}
 
-	templatePool := "kamino_template_" + req.TemplateName
-
-	// Load Proxmox configuration
-	config, err := proxmox.LoadProxmoxConfig()
-	if err != nil {
-		log.Printf("Configuration error for user %s: %v", username, err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("failed to load Proxmox configuration: %v", err),
-		})
+	usernameStr, ok := username.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid session username"})
 		return
 	}
 
-	// Get all virtual resources
-	apiResp, err := proxmox.GetVirtualResources(config)
+	err := ProxmoxCloneTemplate(req.TemplateName, usernameStr)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to fetch virtual resources",
-			"details": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Find VMs in template pool
-	var templateVMs []proxmox.VirtualResource
-	var routerTemplate proxmox.VirtualResource
-	for _, r := range *apiResp {
-
-		// if VM is a member of target pool, add it to list
-		if r.Type == "qemu" && r.ResourcePool == templatePool {
-			templateVMs = append(templateVMs, r)
-		}
-
-		// if vm is pod router template, save that to variable
-		if r.Name == ROUTER_NAME && r.ResourcePool == KAMINO_TEMP_POOL {
-			routerTemplate = r
-		}
-	}
-
-	// handle case where template is empty and should not be cloned
-	if len(templateVMs) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": fmt.Sprintf("No VMs found in template pool: %s", templatePool),
-		})
-		return
-	}
-
-	// get next avaialble pod ID
-	NewPodID, newPodNumber, err := nextPodID(config, c)
-
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to get a pod ID",
-			"details": err.Error(),
-		})
-		return
-	}
-
-	// create new pod resource pool with ID
-	NewPodPool, err := createNewPodPool(username.(string), NewPodID, req.TemplateName, config)
-
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to create new pod resource pool",
-			"details": err.Error(),
-		})
-		return
-	}
-
-	/* Clone 1:1 NAT router from template
-	 *
-	 */
-	newRouter, err := cloneVM(config, routerTemplate, NewPodPool)
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("failed to clone router VM: %v", err))
-	}
-
-	// Clone each VM to new pool
-	for _, vm := range templateVMs {
-		_, err := cloneVM(config, vm, NewPodPool)
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("failed to clone VM %s: %v", vm.Name, err))
-		}
-	}
-
-	// Check if vnet exists, if not, create it
-	vnetExists, err := checkForVnet(config, newPodNumber)
-	var vnetName string
-
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("failed to check current vnets: %v", err))
-	}
-
-	if !vnetExists {
-		vnetName, err = addVNetObject(config, newPodNumber)
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("failed to create new vnet object: %v", err))
-		}
-
-		err = applySDNChanges(config)
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("failed to apply new sdn changes: %v", err))
-		}
-	} else {
-		vnetName = fmt.Sprintf("kamino%d", newPodNumber)
-	}
-
-	// Configure VNet of all VMs
-	err = setPodVnet(config, NewPodPool, vnetName)
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("failed to update pod vnet: %v", err))
-	}
-
-	// Turn on router
-	err = waitForDiskAvailability(config, newRouter.Node, newRouter.VMID, 120*time.Second)
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("router disk unavailable: %v", err))
-	}
-	_, err = proxmox.PowerOnRequest(config, *newRouter)
-
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("failed to start router VM: %v", err))
-	}
-
-	// Wait for router to be running
-	err = proxmox.WaitForRunning(config, *newRouter)
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("failed to start router VM: %v", err))
-	} else {
-		err = configurePodRouter(config, newPodNumber, newRouter.Node, newRouter.VMID)
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("failed to configure pod router: %v", err))
-		}
-	}
-
-	// automatically give user who cloned the pod access
-	err = setPoolPermission(config, NewPodPool, username.(string))
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("failed to update pool permissions for %s: %v", username, err))
-	}
-
-	var success int = 0
-	if len(errors) == 0 {
-		success = 1
-	}
-
-	response := CloneResponse{
-		Success: success,
-		PodName: NewPodPool,
-		Errors:  errors,
-	}
-
-	if len(errors) > 0 {
-		// if an error has occured, count # of successfully cloned VMs
-		var clonedVMs []proxmox.VirtualResource
-		for _, r := range *apiResp {
-			if r.Type == "qemu" && r.ResourcePool == NewPodPool {
-				clonedVMs = append(templateVMs, r)
-			}
-		}
-
-		// if there are no cloned VMs in the resource pool, clean up the resource pool
-		if len(clonedVMs) == 0 {
-			cleanupFailedPodPool(config, NewPodPool)
-		}
-
-		// send response :)
-		c.JSON(http.StatusPartialContent, response)
-	} else {
-		c.JSON(http.StatusOK, response)
-	}
+	c.JSON(http.StatusOK, gin.H{"message": "Pod deployed successfully!"})
 }
 
 // assign a user to be a VM user for a resource pool
@@ -465,16 +308,10 @@ func makeCloneRequest(config *proxmox.ProxmoxConfig, vm proxmox.VirtualResource,
 }
 
 // finds lowest available POD ID between 1001 - 1255
-func nextPodID(config *proxmox.ProxmoxConfig, c *gin.Context) (string, int, error) {
+func nextPodID(config *proxmox.ProxmoxConfig) (string, int, error) {
 	podResponse, err := getAdminPodResponse(config)
-
-	// if error, return error status
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to fetch pod list from proxmox cluster",
-			"details": err,
-		})
-		return "", 0, err
+		return "", 0, fmt.Errorf("failed to fetch pod list from proxmox cluster: %v", err)
 	}
 
 	pods := podResponse.Pods
@@ -513,6 +350,143 @@ func nextPodID(config *proxmox.ProxmoxConfig, c *gin.Context) (string, int, erro
 	return strconv.Itoa(nextId), nextId - 1000, nil
 }
 
+// ProxmoxCloneTemplate performs the full cloning flow for a given template and user.
+func ProxmoxCloneTemplate(templateName, username string) error {
+	var errors []string
+
+	templatePool := "kamino_template_" + templateName
+
+	// Load Proxmox configuration
+	config, err := proxmox.LoadProxmoxConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load Proxmox configuration: %v", err)
+	}
+
+	// Get all virtual resources
+	apiResp, err := proxmox.GetVirtualResources(config)
+	if err != nil {
+		return fmt.Errorf("failed to fetch virtual resources: %v", err)
+	}
+
+	// Find VMs in template pool
+	var templateVMs []proxmox.VirtualResource
+	var routerTemplate proxmox.VirtualResource
+	for _, r := range *apiResp {
+		if r.Type == "qemu" && r.ResourcePool == templatePool {
+			templateVMs = append(templateVMs, r)
+		}
+		if r.Name == ROUTER_NAME && r.ResourcePool == KAMINO_TEMP_POOL {
+			routerTemplate = r
+		}
+	}
+
+	if len(templateVMs) == 0 {
+		return fmt.Errorf("no VMs found in template pool: %s", templatePool)
+	}
+
+	// get next available pod ID
+	NewPodID, newPodNumber, err := nextPodID(config)
+	if err != nil {
+		return fmt.Errorf("failed to get a pod ID: %v", err)
+	}
+
+	// create new pod resource pool with ID
+	NewPodPool, err := createNewPodPool(username, NewPodID, templateName, config)
+	if err != nil {
+		return fmt.Errorf("failed to create new pod resource pool: %v", err)
+	}
+
+	// Clone 1:1 NAT router from template
+	newRouter, err := cloneVM(config, routerTemplate, NewPodPool)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("failed to clone router VM: %v", err))
+	}
+
+	// Clone each VM to new pool
+	for _, vm := range templateVMs {
+		_, err := cloneVM(config, vm, NewPodPool)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("failed to clone VM %s: %v", vm.Name, err))
+		}
+	}
+
+	// Check if vnet exists, if not, create it
+	vnetExists, err := checkForVnet(config, newPodNumber)
+	var vnetName string
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("failed to check current vnets: %v", err))
+	}
+
+	if !vnetExists {
+		vnetName, err = addVNetObject(config, newPodNumber)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("failed to create new vnet object: %v", err))
+		}
+
+		err = applySDNChanges(config)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("failed to apply new sdn changes: %v", err))
+		}
+	} else {
+		vnetName = fmt.Sprintf("kamino%d", newPodNumber)
+	}
+
+	// Configure VNet of all VMs
+	err = setPodVnet(config, NewPodPool, vnetName)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("failed to update pod vnet: %v", err))
+	}
+
+	// Turn on router
+	if newRouter != nil {
+		err = waitForDiskAvailability(config, newRouter.Node, newRouter.VMID, 120*time.Second)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("router disk unavailable: %v", err))
+		}
+		_, err = proxmox.PowerOnRequest(config, *newRouter)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("failed to start router VM: %v", err))
+		}
+
+		// Wait for router to be running
+		err = proxmox.WaitForRunning(config, *newRouter)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("failed to start router VM: %v", err))
+		} else {
+			err = configurePodRouter(config, newPodNumber, newRouter.Node, newRouter.VMID)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("failed to configure pod router: %v", err))
+			}
+		}
+	}
+
+	// automatically give user who cloned the pod access
+	err = setPoolPermission(config, NewPodPool, username)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("failed to update pool permissions for %s: %v", username, err))
+	}
+
+	if len(errors) > 0 {
+		// if an error has occured, count # of successfully cloned VMs
+		var clonedVMs []proxmox.VirtualResource
+		for _, r := range *apiResp {
+			if r.Type == "qemu" && r.ResourcePool == NewPodPool {
+				clonedVMs = append(clonedVMs, r)
+			}
+		}
+
+		// if there are no cloned VMs in the resource pool, clean up the resource pool
+		if len(clonedVMs) == 0 {
+			_ = cleanupFailedPodPool(config, NewPodPool)
+		}
+
+		return fmt.Errorf("failed to clone one or more VMs: %v", errors)
+	}
+
+	database.AddDeployment(templateName)
+	return nil
+}
+
 func cleanupFailedPodPool(config *proxmox.ProxmoxConfig, poolName string) error {
 	poolDeletePath := fmt.Sprintf("api2/json/pools/%s", poolName)
 
@@ -549,6 +523,54 @@ func createNewPodPool(username string, newPodID string, templateName string, con
 	}
 
 	return newPoolName, nil
+}
+
+/*
+ * /api/admin/proxmox/templates/clone/bulk
+ * This function bulk clones a single template for a list of users
+ */
+func BulkCloneTemplate(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("username")
+	isAdmin := session.Get("is_admin")
+
+	// Make sure user is authenticated and is an admin
+	if !isAdmin.(bool) {
+		log.Printf("Forbidden access attempt")
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Only Admin users can delete a template",
+		})
+		return
+	}
+
+	var form struct {
+		Template string   `json:"template"`
+		Names    []string `json:"names"`
+	}
+
+	err := c.ShouldBindJSON(&form)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	fmt.Printf("User %s is cloning %d pods\n", username, len(form.Names))
+	eg := errgroup.Group{}
+	for i := 0; i < len(form.Names); i++ {
+		if form.Names[i] == "" {
+			continue
+		}
+		eg.Go(func() error {
+			return ProxmoxCloneTemplate(form.Template, form.Names[i])
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Pods deployed successfully!"})
 }
 
 func waitForDiskAvailability(config *proxmox.ProxmoxConfig, node string, vmid int, maxWait time.Duration) error {

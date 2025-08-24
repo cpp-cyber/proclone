@@ -334,7 +334,7 @@ func UpdateTemplate(c *gin.Context) {
 }
 
 /*
- * /api/admin/proxmox/templates/update
+ * /api/admin/proxmox/templates/toggle
  * This function toggles the visibility of a published template
  */
 func ToggleTemplateVisibility(c *gin.Context) {
@@ -375,5 +375,50 @@ func ToggleTemplateVisibility(c *gin.Context) {
 	log.Printf("Successfully toggled template visibility %s for admin user %s", templateName, username)
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Template visibility toggled successfully",
+	})
+}
+
+/*
+ * /api/admin/proxmox/templates/delete
+ * This function deletes a template
+ */
+func DeleteTemplate(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("username")
+	isAdmin := session.Get("is_admin")
+
+	// Make sure user is authenticated and is an admin
+	if !isAdmin.(bool) {
+		log.Printf("Forbidden access attempt")
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Only Admin users can delete a template",
+		})
+		return
+	}
+
+	var req struct {
+		TemplateName string `json:"template_name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("Failed to bind JSON for user %s: %v", username, err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request payload",
+		})
+		return
+	}
+	templateName := req.TemplateName
+
+	// Delete the template from the database
+	if err := database.DeleteTemplate(templateName); err != nil {
+		log.Printf("Database error for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to delete template: %v", err),
+		})
+		return
+	}
+
+	log.Printf("Successfully deleted template %s for admin user %s", templateName, username)
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Template deleted successfully",
 	})
 }
