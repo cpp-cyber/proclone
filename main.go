@@ -28,9 +28,9 @@ import (
 )
 
 var (
-	serviceName  = os.Getenv("SERVICE_NAME")
+	serviceName  = os.Getenv("SIGNOZ_SERVICE_NAME")
 	collectorURL = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	insecure     = os.Getenv("INSECURE_MODE")
+	insecure     = os.Getenv("SIGNOZ_INSECURE_MODE")
 )
 
 // init the environment
