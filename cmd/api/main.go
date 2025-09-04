@@ -29,7 +29,8 @@ func init() {
 }
 
 func main() {
-	gin.SetMode(gin.ReleaseMode)
+	// TODO: Set gin mode based on environment (development/production)
+	// gin.SetMode(gin.ReleaseMode)
 
 	// Load and parse configuration from environment variables
 	var config Config

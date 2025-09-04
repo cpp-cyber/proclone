@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -22,10 +23,12 @@ type Group struct {
 
 // GetGroups retrieves all groups from the KaminoGroups OU
 func (s *LDAPService) GetGroups() ([]Group, error) {
+	log.Println("[DEBUG] GetGroups: Starting to retrieve all groups from KaminoGroups OU")
 	config := s.client.Config()
 
 	// Search for all groups in the KaminoGroups OU
 	kaminoGroupsOU := "OU=KaminoGroups," + config.BaseDN
+	log.Printf("[DEBUG] GetGroups: Searching in OU: %s", kaminoGroupsOU)
 	req := ldapv3.NewSearchRequest(
 		kaminoGroupsOU,
 		ldapv3.ScopeWholeSubtree, ldapv3.NeverDerefAliases, 0, 0, false,
@@ -36,18 +39,23 @@ func (s *LDAPService) GetGroups() ([]Group, error) {
 
 	searchResult, err := s.client.Search(req)
 	if err != nil {
+		log.Printf("[ERROR] GetGroups: Failed to search for groups: %v", err)
 		return nil, fmt.Errorf("failed to search for groups: %v", err)
 	}
+	log.Printf("[DEBUG] GetGroups: Found %d groups", len(searchResult.Entries))
 
 	var groups []Group
 	for _, entry := range searchResult.Entries {
 		cn := entry.GetAttributeValue("cn")
+		log.Printf("[DEBUG] GetGroups: Processing group: %s", cn)
 
 		// Check if the group is protected
 		protectedGroup, err := isProtectedGroup(cn)
 		if err != nil {
+			log.Printf("[ERROR] GetGroups: Failed to determine if group %s is protected: %v", cn, err)
 			return nil, fmt.Errorf("failed to determine if the group %s is protected: %v", cn, err)
 		}
+		log.Printf("[DEBUG] GetGroups: Group %s protected status: %v", cn, protectedGroup)
 
 		group := Group{
 			Name:      cn,
@@ -61,12 +69,17 @@ func (s *LDAPService) GetGroups() ([]Group, error) {
 			// AD stores dates in GeneralizedTime format: YYYYMMDDHHMMSS.0Z
 			if parsedTime, err := time.Parse("20060102150405.0Z", whenCreated); err == nil {
 				group.CreatedAt = parsedTime.Format("2006-01-02 15:04:05")
+				log.Printf("[DEBUG] GetGroups: Group %s created at: %s", cn, group.CreatedAt)
+			} else {
+				log.Printf("[WARN] GetGroups: Failed to parse creation date for group %s: %s", cn, whenCreated)
 			}
 		}
 
+		log.Printf("[DEBUG] GetGroups: Group %s has %d members", cn, group.UserCount)
 		groups = append(groups, group)
 	}
 
+	log.Printf("[INFO] GetGroups: Successfully retrieved %d groups", len(groups))
 	return groups, nil
 }
 
@@ -89,21 +102,27 @@ func ValidateGroupName(groupName string) error {
 
 // CreateGroup creates a new group in LDAP
 func (s *LDAPService) CreateGroup(groupName string) error {
+	log.Printf("[DEBUG] CreateGroup: Starting to create group: %s", groupName)
 	config := s.client.Config()
 
 	// Validate group name
 	if err := ValidateGroupName(groupName); err != nil {
+		log.Printf("[ERROR] CreateGroup: Invalid group name %s: %v", groupName, err)
 		return fmt.Errorf("invalid group name: %v", err)
 	}
+	log.Printf("[DEBUG] CreateGroup: Group name validation passed for: %s", groupName)
 
 	// Check if group already exists
 	_, err := s.GetGroupDN(groupName)
 	if err == nil {
+		log.Printf("[ERROR] CreateGroup: Group already exists: %s", groupName)
 		return fmt.Errorf("group already exists: %s", groupName)
 	}
+	log.Printf("[DEBUG] CreateGroup: Confirmed group %s does not exist", groupName)
 
 	// Construct the DN for the new group
 	groupDN := fmt.Sprintf("CN=%s,OU=KaminoGroups,%s", groupName, config.BaseDN)
+	log.Printf("[DEBUG] CreateGroup: Creating group with DN: %s", groupDN)
 
 	// Create the add request
 	addReq := ldapv3.NewAddRequest(groupDN, nil)
@@ -116,9 +135,11 @@ func (s *LDAPService) CreateGroup(groupName string) error {
 
 	err = s.client.Add(addReq)
 	if err != nil {
+		log.Printf("[ERROR] CreateGroup: Failed to create group %s: %v", groupName, err)
 		return fmt.Errorf("failed to create group %s: %v", groupName, err)
 	}
 
+	log.Printf("[INFO] CreateGroup: Successfully created group: %s", groupName)
 	return nil
 }
 
@@ -179,30 +200,39 @@ func (s *LDAPService) RenameGroup(oldGroupName string, newGroupName string) erro
 
 // DeleteGroup deletes a group from LDAP
 func (s *LDAPService) DeleteGroup(groupName string) error {
+	log.Printf("[DEBUG] DeleteGroup: Starting to delete group: %s", groupName)
+
 	// Check if the group is protected
 	protectedGroup, err := isProtectedGroup(groupName)
 	if err != nil {
+		log.Printf("[ERROR] DeleteGroup: Failed to determine if group %s is protected: %v", groupName, err)
 		return fmt.Errorf("failed to determine if the group %s is protected: %v", groupName, err)
 	}
 
 	if protectedGroup {
+		log.Printf("[ERROR] DeleteGroup: Cannot delete protected group: %s", groupName)
 		return fmt.Errorf("cannot delete protected group: %s", groupName)
 	}
+	log.Printf("[DEBUG] DeleteGroup: Group %s is not protected, proceeding with deletion", groupName)
 
 	// Get the DN of the group to delete
 	groupDN, err := s.GetGroupDN(groupName)
 	if err != nil {
+		log.Printf("[ERROR] DeleteGroup: Failed to find group %s: %v", groupName, err)
 		return fmt.Errorf("failed to find group %s: %v", groupName, err)
 	}
+	log.Printf("[DEBUG] DeleteGroup: Found group DN: %s", groupDN)
 
 	// Create delete request
 	delReq := ldapv3.NewDelRequest(groupDN, nil)
 
 	err = s.client.Delete(delReq)
 	if err != nil {
+		log.Printf("[ERROR] DeleteGroup: Failed to delete group %s: %v", groupName, err)
 		return fmt.Errorf("failed to delete group %s: %v", groupName, err)
 	}
 
+	log.Printf("[INFO] DeleteGroup: Successfully deleted group: %s", groupName)
 	return nil
 }
 
@@ -267,53 +297,66 @@ func isProtectedGroup(groupName string) (bool, error) {
 }
 
 func (s *LDAPService) AddUsersToGroup(groupName string, usernames []string) error {
+	log.Printf("[DEBUG] AddUsersToGroup: Adding %d users to group %s", len(usernames), groupName)
 	if len(usernames) == 0 {
+		log.Printf("[DEBUG] AddUsersToGroup: No users to add to group %s", groupName)
 		return nil // Nothing to do
 	}
 
 	// Get group DN first
 	groupDN, err := s.GetGroupDN(groupName)
 	if err != nil {
+		log.Printf("[ERROR] AddUsersToGroup: Failed to find group %s: %v", groupName, err)
 		return fmt.Errorf("failed to find group %s: %v", groupName, err)
 	}
+	log.Printf("[DEBUG] AddUsersToGroup: Found group DN: %s", groupDN)
 
 	// Get all user DNs, filtering out invalid users
 	var validUserDNs []string
 	var invalidUsers []string
 
+	log.Printf("[DEBUG] AddUsersToGroup: Validating %d usernames", len(usernames))
 	for _, username := range usernames {
 		if username == "" {
+			log.Printf("[DEBUG] AddUsersToGroup: Skipping empty username")
 			continue // Skip empty usernames
 		}
 
 		userDN, err := s.GetUserDN(username)
 		if err != nil {
+			log.Printf("[WARN] AddUsersToGroup: Invalid user %s: %v", username, err)
 			invalidUsers = append(invalidUsers, username)
 			continue
 		}
+		log.Printf("[DEBUG] AddUsersToGroup: Valid user %s with DN: %s", username, userDN)
 		validUserDNs = append(validUserDNs, userDN)
 	}
 
 	// If no valid users found, return error
 	if len(validUserDNs) == 0 {
 		if len(invalidUsers) > 0 {
+			log.Printf("[ERROR] AddUsersToGroup: No valid users found. Invalid users: %s", strings.Join(invalidUsers, ", "))
 			return fmt.Errorf("no valid users found. Invalid users: %s", strings.Join(invalidUsers, ", "))
 		}
+		log.Printf("[ERROR] AddUsersToGroup: No users provided")
 		return fmt.Errorf("no users provided")
 	}
 
+	log.Printf("[DEBUG] AddUsersToGroup: Attempting bulk add of %d valid users", len(validUserDNs))
 	// Add all users to the group in a single LDAP modify operation
 	modifyReq := ldapv3.NewModifyRequest(groupDN, nil)
 	modifyReq.Add("member", validUserDNs)
 
 	err = s.client.Modify(modifyReq)
 	if err != nil {
+		log.Printf("[WARN] AddUsersToGroup: Bulk add failed, trying individual adds: %v", err)
 		// If bulk add fails, try adding users individually to identify which ones are already members
 		var alreadyMembers []string
 		var failedUsers []string
 		var successCount int
 
 		for i, userDN := range validUserDNs {
+			log.Printf("[DEBUG] AddUsersToGroup: Individual add attempt for user %s", usernames[i])
 			individualReq := ldapv3.NewModifyRequest(groupDN, nil)
 			individualReq.Add("member", []string{userDN})
 
@@ -321,11 +364,14 @@ func (s *LDAPService) AddUsersToGroup(groupName string, usernames []string) erro
 			if individualErr != nil {
 				if strings.Contains(strings.ToLower(individualErr.Error()), "already exists") ||
 					strings.Contains(strings.ToLower(individualErr.Error()), "attribute or value exists") {
+					log.Printf("[DEBUG] AddUsersToGroup: User %s already member", usernames[i])
 					alreadyMembers = append(alreadyMembers, usernames[i])
 				} else {
+					log.Printf("[ERROR] AddUsersToGroup: Failed to add user %s: %v", usernames[i], individualErr)
 					failedUsers = append(failedUsers, fmt.Sprintf("%s: %v", usernames[i], individualErr))
 				}
 			} else {
+				log.Printf("[DEBUG] AddUsersToGroup: Successfully added user %s", usernames[i])
 				successCount++
 			}
 		}
@@ -346,11 +392,15 @@ func (s *LDAPService) AddUsersToGroup(groupName string, usernames []string) erro
 		}
 
 		if len(failedUsers) > 0 && successCount == 0 {
+			log.Printf("[ERROR] AddUsersToGroup: All operations failed: %s", strings.Join(messages, "; "))
 			return fmt.Errorf("failed to add users to group %s: %s", groupName, strings.Join(messages, "; "))
 		}
 
 		// If some succeeded, just log the status (don't return error for partial success)
+		log.Printf("[INFO] AddUsersToGroup result: %s", strings.Join(messages, "; "))
 		fmt.Printf("AddUsersToGroup result: %s\n", strings.Join(messages, "; "))
+	} else {
+		log.Printf("[INFO] AddUsersToGroup: Bulk add successful for group %s", groupName)
 	}
 
 	return nil

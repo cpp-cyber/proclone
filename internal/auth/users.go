@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/binary"
 	"fmt"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -50,10 +51,12 @@ func (u *UserRegistrationInfo) Validate() error {
 
 // GetUsers retrieves all users from LDAP
 func (s *LDAPService) GetUsers() ([]User, error) {
+	log.Println("[DEBUG] GetUsers: Starting to retrieve all users from KaminoUsers group")
 	config := s.client.Config()
 
 	// Create search request to find all user objects who are members of KaminoUsers group
 	kaminoUsersGroupDN := "CN=KaminoUsers,OU=KaminoGroups," + config.BaseDN
+	log.Printf("[DEBUG] GetUsers: Searching for users in group: %s", kaminoUsersGroupDN)
 	req := ldapv3.NewSearchRequest(
 		config.BaseDN, ldapv3.ScopeWholeSubtree, ldapv3.NeverDerefAliases, 0, 0, false,
 		fmt.Sprintf("(&(objectClass=user)(sAMAccountName=*)(memberOf=%s))", kaminoUsersGroupDN), // Filter for users in KaminoUsers group
@@ -64,13 +67,18 @@ func (s *LDAPService) GetUsers() ([]User, error) {
 	// Perform the search
 	searchResult, err := s.client.Search(req)
 	if err != nil {
+		log.Printf("[ERROR] GetUsers: Failed to search for users: %v", err)
 		return nil, fmt.Errorf("failed to search for users: %v", err)
 	}
+	log.Printf("[DEBUG] GetUsers: Found %d users", len(searchResult.Entries))
 
 	var users = make([]User, 0)
 	for _, entry := range searchResult.Entries {
+		username := entry.GetAttributeValue("sAMAccountName")
+		log.Printf("[DEBUG] GetUsers: Processing user: %s", username)
+
 		user := User{
-			Name: entry.GetAttributeValue("sAMAccountName"),
+			Name: username,
 		}
 
 		// Add creation date if available and convert it
@@ -79,29 +87,42 @@ func (s *LDAPService) GetUsers() ([]User, error) {
 			// AD stores dates in GeneralizedTime format: YYYYMMDDHHMMSS.0Z
 			if parsedTime, err := time.Parse("20060102150405.0Z", whenCreated); err == nil {
 				user.CreatedAt = parsedTime.Format("2006-01-02 15:04:05")
+				log.Printf("[DEBUG] GetUsers: User %s created at: %s", username, user.CreatedAt)
+			} else {
+				log.Printf("[WARN] GetUsers: Failed to parse creation date for user %s: %s", username, whenCreated)
 			}
 		}
 
 		// Check if user is enabled by parsing userAccountControl
-		user.Enabled = isUserEnabled(entry.GetAttributeValue("userAccountControl"))
+		userAccountControl := entry.GetAttributeValue("userAccountControl")
+		user.Enabled = isUserEnabled(userAccountControl)
+		log.Printf("[DEBUG] GetUsers: User %s enabled status: %v (userAccountControl: %s)", username, user.Enabled, userAccountControl)
 
 		// Check for admin privileges and add group memberships
 		var groups []Group
 		var isAdmin = false
-		for _, groupDN := range entry.GetAttributeValues("memberOf") {
+		memberOfGroups := entry.GetAttributeValues("memberOf")
+		log.Printf("[DEBUG] GetUsers: User %s is member of %d groups", username, len(memberOfGroups))
+
+		for _, groupDN := range memberOfGroups {
 			// Check if user is admin based on group membership
 			groupName := extractCNFromDN(groupDN)
+			log.Printf("[DEBUG] GetUsers: User %s member of group: %s (%s)", username, groupName, groupDN)
+
 			if groupName == "Domain Admins" || groupName == "Proxmox-Admins" {
+				log.Printf("[DEBUG] GetUsers: User %s identified as admin via group: %s", username, groupName)
 				isAdmin = true
 			}
 
 			// Only include groups from Kamino-Groups OU in the groups list
 			if !strings.Contains(strings.ToLower(groupDN), "ou=kaminogroups") {
+				log.Printf("[DEBUG] GetUsers: Skipping non-Kamino group for user %s: %s", username, groupName)
 				continue
 			}
 
 			// Add group to user's groups list
 			if groupName != "" {
+				log.Printf("[DEBUG] GetUsers: Adding Kamino group %s to user %s", groupName, username)
 				groups = append(groups, Group{
 					Name: groupName,
 				})
@@ -110,10 +131,13 @@ func (s *LDAPService) GetUsers() ([]User, error) {
 
 		user.IsAdmin = isAdmin
 		user.Groups = groups
+		log.Printf("[DEBUG] GetUsers: User %s summary - Admin: %v, Groups: %d, Enabled: %v",
+			username, user.IsAdmin, len(user.Groups), user.Enabled)
 
 		users = append(users, user)
 	}
 
+	log.Printf("[INFO] GetUsers: Successfully retrieved %d users", len(users))
 	return users, nil
 }
 
@@ -321,37 +345,51 @@ func (s *LDAPService) AddToGroup(userDN string, groupDN string) error {
 
 // RegisterUser creates, configures, and enables a new user account
 func (s *LDAPService) CreateAndRegisterUser(userInfo UserRegistrationInfo) error {
+	log.Printf("[DEBUG] CreateAndRegisterUser: Starting user registration for: %s", userInfo.Username)
+
 	// Validate username and password
 	if err := userInfo.Validate(); err != nil {
+		log.Printf("[ERROR] CreateAndRegisterUser: Validation failed for user %s: %v", userInfo.Username, err)
 		return err
 	}
+	log.Printf("[DEBUG] CreateAndRegisterUser: Validation passed for user: %s", userInfo.Username)
 
 	// Create the user with full information
 	userDN, err := s.CreateUser(userInfo)
 	if err != nil {
+		log.Printf("[ERROR] CreateAndRegisterUser: Failed to create user %s: %v", userInfo.Username, err)
 		return fmt.Errorf("failed to create user: %v", err)
 	}
+	log.Printf("[DEBUG] CreateAndRegisterUser: User created with DN: %s", userDN)
 
 	// Set the password
 	err = s.SetUserPassword(userDN, userInfo.Password)
 	if err != nil {
+		log.Printf("[ERROR] CreateAndRegisterUser: Failed to set password for user %s: %v", userInfo.Username, err)
 		return fmt.Errorf("failed to set password: %v", err)
 	}
+	log.Printf("[DEBUG] CreateAndRegisterUser: Password set for user: %s", userInfo.Username)
 
 	// Add user to default user group
 	config := s.client.Config()
 	userGroupDN := fmt.Sprintf("CN=KaminoUsers,OU=KaminoGroups,%s", config.BaseDN)
+	log.Printf("[DEBUG] CreateAndRegisterUser: Adding user %s to group: %s", userInfo.Username, userGroupDN)
 	err = s.AddToGroup(userDN, userGroupDN)
 	if err != nil {
+		log.Printf("[ERROR] CreateAndRegisterUser: Failed to add user %s to group: %v", userInfo.Username, err)
 		return fmt.Errorf("failed to add user to group: %v", err)
 	}
+	log.Printf("[DEBUG] CreateAndRegisterUser: User %s added to default group", userInfo.Username)
 
 	// Enable the account
 	err = s.EnableUserAccountByDN(userDN)
 	if err != nil {
+		log.Printf("[ERROR] CreateAndRegisterUser: Failed to enable account for user %s: %v", userInfo.Username, err)
 		return fmt.Errorf("failed to enable account: %v", err)
 	}
+	log.Printf("[DEBUG] CreateAndRegisterUser: Account enabled for user: %s", userInfo.Username)
 
+	log.Printf("[INFO] CreateAndRegisterUser: Successfully registered user: %s", userInfo.Username)
 	return nil
 }
 
@@ -418,34 +456,45 @@ func (s *LDAPService) RemoveUserFromGroup(username string, groupName string) err
 }
 
 func (s *LDAPService) DeleteUser(username string) error {
+	log.Printf("[DEBUG] DeleteUser: Starting deletion process for user: %s", username)
+
 	// Get user DN
 	userDN, err := s.GetUserDN(username)
 	if err != nil {
+		log.Printf("[ERROR] DeleteUser: Failed to find user %s: %v", username, err)
 		return fmt.Errorf("failed to find user %s: %v", username, err)
 	}
+	log.Printf("[DEBUG] DeleteUser: Found user DN for %s: %s", username, userDN)
 
 	// Verify that the user is not an admin
 	userGroups, err := s.GetUserGroups(userDN)
 	if err != nil {
+		log.Printf("[ERROR] DeleteUser: Failed to get user groups for %s: %v", username, err)
 		return fmt.Errorf("failed to get user groups: %v", err)
 	}
+	log.Printf("[DEBUG] DeleteUser: User %s is member of %d groups", username, len(userGroups))
 
-	isAdmin, err := isAdmin(userGroups)
+	isAdminUser, err := isAdmin(userGroups)
 	if err != nil {
+		log.Printf("[ERROR] DeleteUser: Failed to check admin status for user %s: %v", username, err)
 		return fmt.Errorf("failed to check if user is admin: %v", err)
 	}
-	if isAdmin {
+	if isAdminUser {
+		log.Printf("[ERROR] DeleteUser: Cannot delete admin user: %s", username)
 		return fmt.Errorf("cannot delete admin user %s", username)
 	}
+	log.Printf("[DEBUG] DeleteUser: User %s is not an admin, proceeding with deletion", username)
 
 	// Create delete request
 	delReq := ldapv3.NewDelRequest(userDN, nil)
 
 	err = s.client.Delete(delReq)
 	if err != nil {
+		log.Printf("[ERROR] DeleteUser: Failed to delete user %s: %v", username, err)
 		return fmt.Errorf("failed to delete user %s: %v", username, err)
 	}
 
+	log.Printf("[INFO] DeleteUser: Successfully deleted user: %s", username)
 	return nil
 }
 
