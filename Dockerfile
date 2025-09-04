@@ -8,6 +8,5 @@ RUN go build -o server ./cmd/api
 FROM debian:bookworm-slim
 WORKDIR /app
 COPY --from=builder /app/server .
-COPY cmd/api/.env .
 EXPOSE 8080
 CMD ["./server"]

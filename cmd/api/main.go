@@ -21,7 +21,11 @@ type Config struct {
 
 // init the environment
 func init() {
-	_ = godotenv.Load()
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using environment variables from system")
+	} else {
+		log.Println("Loaded configuration from .env file")
+	}
 }
 
 func main() {
@@ -33,10 +37,17 @@ func main() {
 		log.Fatalf("Failed to process environment configuration: %v", err)
 	}
 
+	log.Printf("Starting server on port %s", config.Port)
+
 	r := gin.Default()
 
 	// Setup session middleware
 	store := cookie.NewStore([]byte(config.SessionSecret))
+	store.Options(sessions.Options{
+		MaxAge:   3600,
+		HttpOnly: true,
+		Secure:   true,
+	})
 	r.Use(sessions.Sessions("session", store))
 
 	// Initialize handlers
