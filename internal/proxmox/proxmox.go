@@ -33,7 +33,7 @@ type Service interface {
 	FindBestNode() (string, error)
 
 	// Pod Management
-	GetNextPodID() (string, int, error)
+	GetNextPodID(minPodID int, maxPodID int) (string, int, error)
 
 	// VM Management
 	GetVMs() ([]VirtualResource, error)
@@ -45,7 +45,7 @@ type Service interface {
 	ConvertVMToTemplate(node string, vmID int) error
 	CloneVM(sourceVM VM, newPoolName string) (*VM, error)
 	WaitForCloneCompletion(vm *VM, timeout time.Duration) error
-	WaitForDiskAvailability(node string, vmid int, maxWait time.Duration) error
+	WaitForDisk(node string, vmid int, maxWait time.Duration) error
 	WaitForRunning(vm VM) error
 	WaitForStopped(vm VM) error
 
@@ -56,9 +56,6 @@ type Service interface {
 	DeletePool(poolName string) error
 	IsPoolEmpty(poolName string) (bool, error)
 	WaitForPoolEmpty(poolName string, timeout time.Duration) error
-
-	// Network Management
-	SetPodVnet(poolName, vnetName string) error
 
 	// Template Management
 	GetTemplatePools() ([]string, error)

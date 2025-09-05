@@ -13,7 +13,6 @@ import (
 	"github.com/cpp-cyber/proclone/internal/tools"
 )
 
-// GetPoolVMs retrieves all VMs in a specific pool
 func (c *Client) GetPoolVMs(poolName string) ([]VirtualResource, error) {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
@@ -38,7 +37,6 @@ func (c *Client) GetPoolVMs(poolName string) ([]VirtualResource, error) {
 	return vms, nil
 }
 
-// CreateNewPool creates a new pool with the given name
 func (c *Client) CreateNewPool(poolName string) error {
 	reqBody := map[string]string{
 		"poolid": poolName,
@@ -58,7 +56,6 @@ func (c *Client) CreateNewPool(poolName string) error {
 	return nil
 }
 
-// SetPoolPermission sets permissions for a pool to a user/group
 func (c *Client) SetPoolPermission(poolName string, targetName string, realm string, isGroup bool) error {
 	reqBody := map[string]any{
 		"path":      fmt.Sprintf("/pool/%s", poolName),
@@ -86,7 +83,6 @@ func (c *Client) SetPoolPermission(poolName string, targetName string, realm str
 	return nil
 }
 
-// DeletePool removes a pool completely
 func (c *Client) DeletePool(poolName string) error {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "DELETE",
@@ -102,7 +98,6 @@ func (c *Client) DeletePool(poolName string) error {
 	return nil
 }
 
-// GetTemplatePools retrieves all template pools
 func (c *Client) GetTemplatePools() ([]string, error) {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
@@ -126,7 +121,6 @@ func (c *Client) GetTemplatePools() ([]string, error) {
 	return templatePools, nil
 }
 
-// IsPoolEmpty checks if a pool is empty (contains no VMs)
 func (c *Client) IsPoolEmpty(poolName string) (bool, error) {
 	poolVMs, err := c.GetPoolVMs(poolName)
 	if err != nil {
@@ -172,7 +166,7 @@ func (c *Client) WaitForPoolEmpty(poolName string, timeout time.Duration) error 
 }
 
 // GetNextPodID finds the next available pod ID between MIN_POD_ID and MAX_POD_ID
-func (c *Client) GetNextPodID() (string, int, error) {
+func (c *Client) GetNextPodID(minPodID int, maxPodID int) (string, int, error) {
 	// Get all existing pools
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
@@ -191,7 +185,7 @@ func (c *Client) GetNextPodID() (string, int, error) {
 	for _, pool := range poolsResponse {
 		if len(pool.PoolID) >= 4 {
 			if id, err := strconv.Atoi(pool.PoolID[:4]); err == nil {
-				if id >= 1001 && id <= 1255 { // MIN_POD_ID and MAX_POD_ID constants
+				if id >= minPodID && id <= maxPodID {
 					usedIDs = append(usedIDs, id)
 				}
 			}
@@ -201,7 +195,7 @@ func (c *Client) GetNextPodID() (string, int, error) {
 	sort.Ints(usedIDs)
 
 	// Find first available ID
-	for i := 1001; i <= 1255; i++ { // MIN_POD_ID to MAX_POD_ID
+	for i := minPodID; i <= maxPodID; i++ {
 		found := slices.Contains(usedIDs, i)
 		if !found {
 			return fmt.Sprintf("%04d", i), i - 1000, nil

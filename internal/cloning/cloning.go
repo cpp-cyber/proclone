@@ -138,7 +138,7 @@ func (cm *CloningManager) CloneTemplate(template string, targetName string, isGr
 
 	// 5. Get the next available pod ID and create new pool
 	log.Printf("Step 5: Allocating pod ID and creating new pool")
-	newPodID, newPodNumber, err := cm.ProxmoxService.GetNextPodID()
+	newPodID, newPodNumber, err := cm.ProxmoxService.GetNextPodID(cm.Config.MinPodID, cm.Config.MaxPodID)
 	if err != nil {
 		log.Printf("ERROR: Failed to get next pod ID: %v", err)
 		return fmt.Errorf("failed to get next pod ID: %w", err)
@@ -196,7 +196,7 @@ func (cm *CloningManager) CloneTemplate(template string, targetName string, isGr
 	// 7. Configure VNet of all VMs
 	log.Printf("Step 7: Configuring VNet for all VMs in pool '%s'", newPoolName)
 	log.Printf("Setting VNet to: '%s' for pod number %d", vnetName, newPodNumber)
-	err = cm.ProxmoxService.SetPodVnet(newPoolName, vnetName)
+	err = cm.SetPodVnet(newPoolName, vnetName)
 	if err != nil {
 		log.Printf("ERROR: Failed to configure VNet '%s' for pool '%s': %v", vnetName, newPoolName, err)
 		errors = append(errors, fmt.Sprintf("failed to update pod vnet: %v", err))
@@ -209,7 +209,7 @@ func (cm *CloningManager) CloneTemplate(template string, targetName string, isGr
 	if newRouter != nil {
 		log.Printf("Waiting for router disk availability (VMID: %d, Node: %s, Timeout: %v)",
 			newRouter.VMID, newRouter.Node, cm.Config.RouterWaitTimeout)
-		err = cm.ProxmoxService.WaitForDiskAvailability(newRouter.Node, newRouter.VMID, cm.Config.RouterWaitTimeout)
+		err = cm.ProxmoxService.WaitForDisk(newRouter.Node, newRouter.VMID, cm.Config.RouterWaitTimeout)
 		if err != nil {
 			log.Printf("ERROR: Router disk unavailable (VMID: %d): %v", newRouter.VMID, err)
 			errors = append(errors, fmt.Sprintf("router disk unavailable: %v", err))

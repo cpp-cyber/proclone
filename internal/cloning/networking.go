@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"regexp"
 	"time"
 
 	"github.com/cpp-cyber/proclone/internal/tools"
@@ -76,5 +77,43 @@ func (cm *CloningManager) configurePodRouter(podNumber int, node string, vmid in
 	}
 
 	log.Printf("Successfully configured router for pod %d on node %s, VMID %d", podNumber, node, vmid)
+	return nil
+}
+
+// SetPodVnet configures the VNet for all VMs in a pod
+func (cm *CloningManager) SetPodVnet(poolName string, vnetName string) error {
+	// Get all VMs in the pool
+	vms, err := cm.ProxmoxService.GetPoolVMs(poolName)
+	if err != nil {
+		return fmt.Errorf("failed to get pool VMs: %w", err)
+	}
+
+	routerRegex := regexp.MustCompile(`(?i).*(router|pfsense).*`)
+
+	for _, vm := range vms {
+		vnet := "net0"
+
+		// Detect if VM is a router based on its name (lazy way but requires fewer API calls)
+		if routerRegex.MatchString(vm.Name) {
+			vnet = "net1"
+		}
+
+		// Update VM network configuration
+		reqBody := map[string]string{
+			vnet: fmt.Sprintf("virtio,bridge=%s,firewall=1", vnetName),
+		}
+
+		req := tools.ProxmoxAPIRequest{
+			Method:      "PUT",
+			Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/config", vm.NodeName, vm.VmId),
+			RequestBody: reqBody,
+		}
+
+		_, err := cm.ProxmoxService.GetRequestHelper().MakeRequest(req)
+		if err != nil {
+			return fmt.Errorf("failed to update network for VM %d: %w", vm.VmId, err)
+		}
+	}
+
 	return nil
 }

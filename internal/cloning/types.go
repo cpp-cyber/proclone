@@ -15,13 +15,13 @@ type Config struct {
 	RouterName        string        `envconfig:"ROUTER_NAME" default:"1-1NAT-pfsense"`
 	RouterVMID        int           `envconfig:"ROUTER_VMID"`
 	RouterNode        string        `envconfig:"ROUTER_NODE"`
-	MinPodID          int           `envconfig:"MIN_POD_ID" default:"1000"`
-	MaxPodID          int           `envconfig:"MAX_POD_ID" default:"1255"`
+	MinPodID          int           `envconfig:"MIN_POD_ID" default:"1001"`
+	MaxPodID          int           `envconfig:"MAX_POD_ID" default:"1250"`
 	CloneTimeout      time.Duration `envconfig:"CLONE_TIMEOUT" default:"3m"`
 	RouterWaitTimeout time.Duration `envconfig:"ROUTER_WAIT_TIMEOUT" default:"120s"`
 	SDNApplyTimeout   time.Duration `envconfig:"SDN_APPLY_TIMEOUT" default:"30s"`
-	WANScriptPath     string        `envconfig:"WAN_SCRIPT_PATH" default:"/opt/scripts/change-wan-ip.sh"`
-	VIPScriptPath     string        `envconfig:"VIP_SCRIPT_PATH" default:"/opt/scripts/change-vip-subnet.sh"`
+	WANScriptPath     string        `envconfig:"WAN_SCRIPT_PATH" default:"/home/change-wan-ip.sh"`
+	VIPScriptPath     string        `envconfig:"VIP_SCRIPT_PATH" default:"/home/change-vip-subnet.sh"`
 	WANIPBase         string        `envconfig:"WAN_IP_BASE" default:"172.16."`
 }
 

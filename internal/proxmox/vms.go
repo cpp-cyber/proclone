@@ -1,7 +1,6 @@
 package proxmox
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -10,6 +9,10 @@ import (
 
 	"github.com/cpp-cyber/proclone/internal/tools"
 )
+
+// =================================================
+// PUBLIC FUNCTIONS
+// =================================================
 
 func (c *Client) GetVMs() ([]VirtualResource, error) {
 	vms, err := c.GetClusterResources("type=vm")
@@ -20,80 +23,23 @@ func (c *Client) GetVMs() ([]VirtualResource, error) {
 }
 
 func (c *Client) StartVM(node string, vmID int) error {
-	if err := c.ValidateVMID(vmID); err != nil {
-		return err
-	}
-
-	req := tools.ProxmoxAPIRequest{
-		Method:   "POST",
-		Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/status/start", node, vmID),
-	}
-
-	_, err := c.RequestHelper.MakeRequest(req)
-	if err != nil {
-		return fmt.Errorf("failed to start VM: %w", err)
-	}
-
-	return nil
-}
-
-func (c *Client) ShutdownVM(node string, vmID int) error {
-	if err := c.ValidateVMID(vmID); err != nil {
-		return err
-	}
-
-	req := tools.ProxmoxAPIRequest{
-		Method:   "POST",
-		Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/status/shutdown", node, vmID),
-	}
-
-	_, err := c.RequestHelper.MakeRequest(req)
-	if err != nil {
-		return fmt.Errorf("failed to shutdown VM: %w", err)
-	}
-
-	return nil
-}
-
-func (c *Client) RebootVM(node string, vmID int) error {
-	if err := c.ValidateVMID(vmID); err != nil {
-		return err
-	}
-
-	req := tools.ProxmoxAPIRequest{
-		Method:   "POST",
-		Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/status/reboot", node, vmID),
-	}
-
-	_, err := c.RequestHelper.MakeRequest(req)
-	if err != nil {
-		return fmt.Errorf("failed to reboot VM: %w", err)
-	}
-
-	return nil
+	return c.vmAction(node, vmID, "start")
 }
 
 func (c *Client) StopVM(node string, vmID int) error {
-	if err := c.ValidateVMID(vmID); err != nil {
-		return err
-	}
-
-	req := tools.ProxmoxAPIRequest{
-		Method:   "POST",
-		Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/status/stop", node, vmID),
-	}
-
-	_, err := c.RequestHelper.MakeRequest(req)
-	if err != nil {
-		return fmt.Errorf("failed to stop VM: %w", err)
-	}
-
-	return nil
+	return c.vmAction(node, vmID, "stop")
 }
 
-// DeleteVM deletes a VM completely
+func (c *Client) ShutdownVM(node string, vmID int) error {
+	return c.vmAction(node, vmID, "shutdown")
+}
+
+func (c *Client) RebootVM(node string, vmID int) error {
+	return c.vmAction(node, vmID, "reboot")
+}
+
 func (c *Client) DeleteVM(node string, vmID int) error {
-	if err := c.ValidateVMID(vmID); err != nil {
+	if err := c.validateVMID(vmID); err != nil {
 		return err
 	}
 
@@ -111,7 +57,7 @@ func (c *Client) DeleteVM(node string, vmID int) error {
 }
 
 func (c *Client) ConvertVMToTemplate(node string, vmID int) error {
-	if err := c.ValidateVMID(vmID); err != nil {
+	if err := c.validateVMID(vmID); err != nil {
 		return err
 	}
 
@@ -130,7 +76,6 @@ func (c *Client) ConvertVMToTemplate(node string, vmID int) error {
 	return nil
 }
 
-// CloneVM clones a VM to a new pool
 func (c *Client) CloneVM(sourceVM VM, newPoolName string) (*VM, error) {
 	// Get next available VMID
 	req := tools.ProxmoxAPIRequest{
@@ -188,7 +133,6 @@ func (c *Client) CloneVM(sourceVM VM, newPoolName string) (*VM, error) {
 	return newVM, nil
 }
 
-// WaitForCloneCompletion waits for a clone operation to complete
 func (c *Client) WaitForCloneCompletion(vm *VM, timeout time.Duration) error {
 	start := time.Now()
 	backoff := time.Second
@@ -196,44 +140,17 @@ func (c *Client) WaitForCloneCompletion(vm *VM, timeout time.Duration) error {
 
 	for time.Since(start) < timeout {
 		// Check VM status
-		req := tools.ProxmoxAPIRequest{
-			Method:   "GET",
-			Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/status/current", vm.Node, vm.VMID),
-		}
-
-		data, err := c.RequestHelper.MakeRequest(req)
+		status, err := c.getVMStatus(vm.Node, vm.VMID)
 		if err != nil {
 			time.Sleep(backoff)
 			backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
 			continue
 		}
 
-		var statusResponse struct {
-			Status string `json:"status"`
-		}
-
-		if err := json.Unmarshal(data, &statusResponse); err != nil {
-			time.Sleep(backoff)
-			backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
-			continue
-		}
-
-		if statusResponse.Status == "running" || statusResponse.Status == "stopped" {
+		if status == "running" || status == "stopped" {
 			// Check if VM is locked (clone in progress)
-			configReq := tools.ProxmoxAPIRequest{
-				Method:   "GET",
-				Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/config", vm.Node, vm.VMID),
-			}
-
-			configData, err := c.RequestHelper.MakeRequest(configReq)
+			configResp, err := c.getVMConfig(vm.Node, vm.VMID)
 			if err != nil {
-				time.Sleep(backoff)
-				backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
-				continue
-			}
-
-			var configResp ConfigResponse
-			if err := json.Unmarshal(configData, &configResp); err != nil {
 				time.Sleep(backoff)
 				backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
 				continue
@@ -251,109 +168,77 @@ func (c *Client) WaitForCloneCompletion(vm *VM, timeout time.Duration) error {
 	return fmt.Errorf("clone operation timed out after %v", timeout)
 }
 
-// WaitForDiskAvailability waits for VM disks to become available
-func (c *Client) WaitForDiskAvailability(node string, vmid int, maxWait time.Duration) error {
+func (c *Client) WaitForDisk(node string, vmid int, maxWait time.Duration) error {
 	start := time.Now()
 
 	for time.Since(start) < maxWait {
 		time.Sleep(2 * time.Second)
 
-		req := tools.ProxmoxAPIRequest{
-			Method:   "GET",
-			Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/config", node, vmid),
-		}
-
-		data, err := c.RequestHelper.MakeRequest(req)
+		configResp, err := c.getVMConfig(node, vmid)
 		if err != nil {
 			continue
 		}
 
-		var configResp ConfigResponse
-		if err := json.Unmarshal(data, &configResp); err != nil {
-			continue
-		}
-
 		if configResp.HardDisk != "" {
-			return nil
+			return nil // Disk is available
 		}
 	}
 
 	return fmt.Errorf("timeout waiting for VM disks to become available")
 }
 
-// WaitForRunning waits for a VM to be in running state
-func (c *Client) WaitForRunning(vm VM) error {
-	timeout := 2 * time.Minute
-	start := time.Now()
-
-	for time.Since(start) < timeout {
-		req := tools.ProxmoxAPIRequest{
-			Method:   "GET",
-			Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/status/current", vm.Node, vm.VMID),
-		}
-
-		data, err := c.RequestHelper.MakeRequest(req)
-		if err != nil {
-			time.Sleep(5 * time.Second)
-			continue
-		}
-
-		var statusResponse struct {
-			Status string `json:"status"`
-		}
-
-		if err := json.Unmarshal(data, &statusResponse); err != nil {
-			time.Sleep(5 * time.Second)
-			continue
-		}
-
-		if statusResponse.Status == "running" {
-			return nil
-		}
-
-		time.Sleep(5 * time.Second)
-	}
-
-	return fmt.Errorf("timeout waiting for VM to be running")
-}
-
-// WaitForStopped waits for a VM to be in stopped state
 func (c *Client) WaitForStopped(vm VM) error {
+	return c.waitForStatus("stopped", vm)
+}
+
+func (c *Client) WaitForRunning(vm VM) error {
+	return c.waitForStatus("running", vm)
+}
+
+// =================================================
+// PRIVATE FUNCTIONS
+// =================================================
+
+func (c *Client) vmAction(node string, vmID int, action string) error {
+	if err := c.validateVMID(vmID); err != nil {
+		return err
+	}
+
+	req := tools.ProxmoxAPIRequest{
+		Method:   "POST",
+		Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/status/%s", node, vmID, action),
+	}
+
+	_, err := c.RequestHelper.MakeRequest(req)
+	if err != nil {
+		return fmt.Errorf("failed to %s VM: %w", action, err)
+	}
+
+	return nil
+}
+
+func (c *Client) waitForStatus(targetStatus string, vm VM) error {
 	timeout := 2 * time.Minute
 	start := time.Now()
 
 	for time.Since(start) < timeout {
-		req := tools.ProxmoxAPIRequest{
-			Method:   "GET",
-			Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/status/current", vm.Node, vm.VMID),
-		}
-
-		data, err := c.RequestHelper.MakeRequest(req)
+		currentStatus, err := c.getVMStatus(vm.Node, vm.VMID)
 		if err != nil {
 			time.Sleep(5 * time.Second)
 			continue
 		}
 
-		var statusResponse struct {
-			Status string `json:"status"`
-		}
-
-		if err := json.Unmarshal(data, &statusResponse); err != nil {
-			time.Sleep(5 * time.Second)
-			continue
-		}
-
-		if statusResponse.Status == "stopped" {
+		if currentStatus == targetStatus {
 			return nil
 		}
 
 		time.Sleep(5 * time.Second)
 	}
 
-	return fmt.Errorf("timeout waiting for VM to be stopped")
+	return fmt.Errorf("timeout waiting for VM to be %s", targetStatus)
 }
 
-func (c *Client) ValidateVMID(vmID int) error {
+func (c *Client) validateVMID(vmID int) error {
 	// Get VMs
 	vms, err := c.GetClusterResources("type=vm")
 	if err != nil {
@@ -372,4 +257,32 @@ func (c *Client) ValidateVMID(vmID int) error {
 	}
 
 	return fmt.Errorf("VMID %d not found", vmID)
+}
+
+func (c *Client) getVMConfig(node string, VMID int) (*VirtualResourceConfig, error) {
+	configReq := tools.ProxmoxAPIRequest{
+		Method:   "GET",
+		Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/config", node, VMID),
+	}
+
+	var config VirtualResourceConfig
+	if err := c.RequestHelper.MakeRequestAndUnmarshal(configReq, &config); err != nil {
+		return nil, fmt.Errorf("failed to get VM config: %w", err)
+	}
+
+	return &config, nil
+}
+
+func (c *Client) getVMStatus(node string, VMID int) (string, error) {
+	req := tools.ProxmoxAPIRequest{
+		Method:   "GET",
+		Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/status/current", node, VMID),
+	}
+
+	var response VirtualResourceStatus
+	if err := c.RequestHelper.MakeRequestAndUnmarshal(req, &response); err != nil {
+		return "", fmt.Errorf("failed to get VM status: %w", err)
+	}
+
+	return response.Status, nil
 }

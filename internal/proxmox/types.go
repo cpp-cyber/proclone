@@ -1,9 +1,16 @@
 package proxmox
 
-// ConfigResponse represents VM configuration response
-type ConfigResponse struct {
-	HardDisk string `json:"scsi0,omitempty"`
+// VirtualResourceConfig represents VM configuration response
+type VirtualResourceConfig struct {
+	HardDisk string `json:"scsi0"`
 	Lock     string `json:"lock,omitempty"`
+	Net0     string `json:"net0"`
+	Net1     string `json:"net1,omitempty"`
+}
+
+// VirtualResourceStatus represents the status of a virtual resource
+type VirtualResourceStatus struct {
+	Status string `json:"status"`
 }
 
 // VNetResponse represents the VNet API response
