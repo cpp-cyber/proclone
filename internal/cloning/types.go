@@ -11,7 +11,6 @@ import (
 
 // Config holds the configuration for cloning operations
 type Config struct {
-	Realm             string        `envconfig:"REALM"`
 	RouterName        string        `envconfig:"ROUTER_NAME" default:"1-1NAT-pfsense"`
 	RouterVMID        int           `envconfig:"ROUTER_VMID"`
 	RouterNode        string        `envconfig:"ROUTER_NODE"`

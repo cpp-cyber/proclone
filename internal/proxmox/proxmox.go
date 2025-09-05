@@ -19,6 +19,7 @@ type ProxmoxConfig struct {
 	TokenSecret  string   `envconfig:"PROXMOX_TOKEN_SECRET" required:"true"`
 	VerifySSL    bool     `envconfig:"PROXMOX_VERIFY_SSL" default:"false"`
 	CriticalPool string   `envconfig:"PROXMOX_CRITICAL_POOL"`
+	Realm        string   `envconfig:"REALM"`
 	NodesStr     string   `envconfig:"PROXMOX_NODES"`
 	Nodes        []string // Parsed from NodesStr
 	APIToken     string   // Computed from TokenID and TokenSecret
@@ -52,7 +53,7 @@ type Service interface {
 	// Pool Management
 	GetPoolVMs(poolName string) ([]VirtualResource, error)
 	CreateNewPool(poolName string) error
-	SetPoolPermission(poolName string, targetName string, realm string, isGroup bool) error
+	SetPoolPermission(poolName string, targetName string, isGroup bool) error
 	DeletePool(poolName string) error
 	IsPoolEmpty(poolName string) (bool, error)
 	WaitForPoolEmpty(poolName string, timeout time.Duration) error

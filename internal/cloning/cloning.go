@@ -49,7 +49,7 @@ func NewCloningManager(proxmoxService proxmox.Service, db *sql.DB, ldapService a
 		return nil, fmt.Errorf("failed to load cloning configuration: %w", err)
 	}
 
-	if config.Realm == "" || config.RouterVMID == 0 || config.RouterNode == "" {
+	if config.RouterVMID == 0 || config.RouterNode == "" {
 		return nil, fmt.Errorf("incomplete cloning configuration")
 	}
 
@@ -248,7 +248,7 @@ func (cm *CloningManager) CloneTemplate(template string, targetName string, isGr
 
 	// 10. Set permissions on the pool to the user/group
 	log.Printf("Step 10: Setting permissions on pool '%s' for target '%s' (isGroup: %t)", newPoolName, targetName, isGroup)
-	err = cm.ProxmoxService.SetPoolPermission(newPoolName, targetName, cm.Config.Realm, isGroup)
+	err = cm.ProxmoxService.SetPoolPermission(newPoolName, targetName, isGroup)
 	if err != nil {
 		log.Printf("ERROR: Failed to set permissions on pool '%s' for '%s': %v", newPoolName, targetName, err)
 		errors = append(errors, fmt.Sprintf("failed to update pool permissions for %s: %v", targetName, err))

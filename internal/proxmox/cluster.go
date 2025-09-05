@@ -109,6 +109,20 @@ func (c *Client) FindBestNode() (string, error) {
 	return bestNode, nil
 }
 
+func (c *Client) SyncRealm() error {
+	req := tools.ProxmoxAPIRequest{
+		Method:   "POST",
+		Endpoint: fmt.Sprintf("/access/domains/%s/sync", c.Config.Realm),
+	}
+
+	_, err := c.RequestHelper.MakeRequest(req)
+	if err != nil {
+		return fmt.Errorf("failed to sync realm: %w", err)
+	}
+
+	return nil
+}
+
 // =================================================
 // PRIVATE FUNCTIONS
 // =================================================

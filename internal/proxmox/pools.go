@@ -56,7 +56,7 @@ func (c *Client) CreateNewPool(poolName string) error {
 	return nil
 }
 
-func (c *Client) SetPoolPermission(poolName string, targetName string, realm string, isGroup bool) error {
+func (c *Client) SetPoolPermission(poolName string, targetName string, isGroup bool) error {
 	reqBody := map[string]any{
 		"path":      fmt.Sprintf("/pool/%s", poolName),
 		"roles":     "PVEVMUser,PVEPoolUser",
@@ -64,9 +64,9 @@ func (c *Client) SetPoolPermission(poolName string, targetName string, realm str
 	}
 
 	if isGroup {
-		reqBody["groups"] = fmt.Sprintf("%s-%s", targetName, realm)
+		reqBody["groups"] = fmt.Sprintf("%s-%s", targetName, c.Config.Realm)
 	} else {
-		reqBody["users"] = fmt.Sprintf("%s@%s", targetName, realm)
+		reqBody["users"] = fmt.Sprintf("%s@%s", targetName, c.Config.Realm)
 	}
 
 	req := tools.ProxmoxAPIRequest{
