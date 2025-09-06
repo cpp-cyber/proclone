@@ -60,19 +60,17 @@ func (ch *CloningHandler) CloneTemplateHandler(c *gin.Context) {
 	username := session.Get("id").(string)
 
 	var req CloneRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Invalid request body",
-			"details": err.Error(),
-		})
+	if !ValidateAndBind(c, &req) {
 		return
 	}
+
+	log.Printf("User %s requested cloning of template %s", username, req.Template)
 
 	// Construct the full template pool name
 	templatePoolName := "kamino_template_" + req.Template
 
-	err := ch.Manager.CloneTemplate(templatePoolName, username, false)
-	if err != nil {
+	if err := ch.Manager.CloneTemplate(templatePoolName, username, false); err != nil {
+		log.Printf("Error cloning template: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to clone template",
 			"details": err.Error(),
@@ -80,41 +78,21 @@ func (ch *CloningHandler) CloneTemplateHandler(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success":  true,
-		"message":  fmt.Sprintf("Pod template cloned successfully for user %s", username),
-		"template": req.Template,
-	})
+	log.Printf("Template %s cloned successfully for user %s", req.Template, username)
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 // ADMIN: BulkCloneTemplateHandler handles POST requests for cloning multiple templates for a list of users
 func (ch *CloningHandler) AdminCloneTemplateHandler(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("id").(string)
+
 	var req AdminCloneRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Invalid request body",
-			"details": err.Error(),
-		})
+	if !ValidateAndBind(c, &req) {
 		return
 	}
 
-	// Verify that template is not blank
-	if req.Template == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "No template specified",
-			"details": "A template must be specified",
-		})
-		return
-	}
-
-	// Verify that users and groups are not empty
-	if len(req.Usernames) == 0 && len(req.Groups) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "No users or groups specified",
-			"details": "At least one user or group must be specified",
-		})
-		return
-	}
+	log.Printf("%s requested bulk cloning of template %s", username, req.Template)
 
 	// Construct the full template pool name
 	templatePoolName := "kamino_template_" + req.Template
@@ -138,6 +116,7 @@ func (ch *CloningHandler) AdminCloneTemplateHandler(c *gin.Context) {
 
 	// Check for errors
 	if len(errors) > 0 {
+		log.Printf("Admin %s encountered errors while cloning templates: %v", username, errors)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to clone templates",
 			"details": errors,
@@ -157,15 +136,13 @@ func (ch *CloningHandler) DeletePodHandler(c *gin.Context) {
 	username := session.Get("id").(string)
 
 	var req DeletePodRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Invalid request body",
-			"details": err.Error(),
-		})
+	if !ValidateAndBind(c, &req) {
 		return
 	}
 
-	// Check if the pod belongs to the user
+	log.Printf("User %s requested deletion of pod %s", username, req.Pod)
+
+	// Check if the pod belongs to the user (maybe allow users to delete group pods in the future?)
 	if !strings.Contains(req.Pod, username) {
 		c.JSON(http.StatusForbidden, gin.H{
 			"error":   "You do not have permission to delete this pod",
@@ -176,6 +153,7 @@ func (ch *CloningHandler) DeletePodHandler(c *gin.Context) {
 
 	err := ch.Manager.DeletePod(req.Pod)
 	if err != nil {
+		log.Printf("Error deleting %s pod: %v", req.Pod, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to delete pod",
 			"details": err.Error(),
@@ -187,14 +165,15 @@ func (ch *CloningHandler) DeletePodHandler(c *gin.Context) {
 }
 
 func (ch *CloningHandler) AdminDeletePodHandler(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("id").(string)
+
 	var req AdminDeletePodRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Invalid request body",
-			"details": err.Error(),
-		})
+	if !ValidateAndBind(c, &req) {
 		return
 	}
+
+	log.Printf("Admin %s requested deletion of pods: %v", username, req.Pods)
 
 	var errors []error
 	for _, pod := range req.Pods {
@@ -205,6 +184,7 @@ func (ch *CloningHandler) AdminDeletePodHandler(c *gin.Context) {
 	}
 
 	if len(errors) > 0 {
+		log.Printf("Admin %s encountered errors while deleting pods: %v", username, errors)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to delete pods",
 			"details": errors,
@@ -238,7 +218,8 @@ func (ch *CloningHandler) GetPodsHandler(c *gin.Context) {
 
 	pods, err := ch.Manager.GetPods(username)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve pods for user " + username, "details": err.Error()})
+		log.Printf("Error retrieving pods for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve pods", "details": err.Error()})
 		return
 	}
 
@@ -247,7 +228,8 @@ func (ch *CloningHandler) GetPodsHandler(c *gin.Context) {
 		templateName := strings.Replace(pods[i].Name[5:], fmt.Sprintf("_%s", username), "", 1)
 		templateInfo, err := ch.Manager.DatabaseService.GetTemplateInfo(templateName)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve template info for pod " + pods[i].Name, "details": err.Error()})
+			log.Printf("Error retrieving template info for pod %s: %v", pods[i].Name, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve template info for pod", "details": err.Error()})
 			return
 		}
 		pods[i].Template = templateInfo
@@ -263,19 +245,19 @@ func (ch *CloningHandler) AdminGetPodsHandler(c *gin.Context) {
 
 	pods, err := ch.Manager.GetAllPods()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve pods for user " + username, "details": err.Error()})
+		log.Printf("Error retrieving all pods for admin %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve pods for user", "details": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"pods": pods})
 }
 
-// Template-related handlers
-
 // PRIVATE: GetTemplatesHandler handles GET requests for retrieving templates
 func (ch *CloningHandler) GetTemplatesHandler(c *gin.Context) {
 	templates, err := ch.Manager.DatabaseService.GetTemplates()
 	if err != nil {
+		log.Printf("Error retrieving templates: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to retrieve templates",
 			"details": err.Error(),
@@ -291,8 +273,12 @@ func (ch *CloningHandler) GetTemplatesHandler(c *gin.Context) {
 
 // ADMIN: GetPublishedTemplatesHandler handles GET requests for retrieving all templates
 func (ch *CloningHandler) AdminGetTemplatesHandler(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("id").(string)
+
 	templates, err := ch.Manager.DatabaseService.GetPublishedTemplates()
 	if err != nil {
+		log.Printf("Error retrieving all templates for admin %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to retrieve all templates",
 			"details": err.Error(),
@@ -318,14 +304,18 @@ func (ch *CloningHandler) GetTemplateImageHandler(c *gin.Context) {
 
 // ADMIN: PublishTemplateHandler handles POST requests for publishing a template
 func (ch *CloningHandler) PublishTemplateHandler(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("id").(string)
+
 	var req PublishTemplateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
+	if !ValidateAndBind(c, &req) {
 		return
 	}
 
+	log.Printf("Admin %s requested publishing of template %s", username, req.Template.Name)
+
 	if err := ch.Manager.PublishTemplate(req.Template); err != nil {
-		log.Printf("Error publishing template: %v", err)
+		log.Printf("Error publishing template for admin %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to publish template",
 			"details": err.Error(),
@@ -340,13 +330,18 @@ func (ch *CloningHandler) PublishTemplateHandler(c *gin.Context) {
 
 // ADMIN: DeleteTemplateHandler handles POST requests for deleting a template
 func (ch *CloningHandler) DeleteTemplateHandler(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("id").(string)
+
 	var req TemplateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
+	if !ValidateAndBind(c, &req) {
 		return
 	}
 
+	log.Printf("Admin %s requested deletion of template %s", username, req.Template)
+
 	if err := ch.Manager.DatabaseService.DeleteTemplate(req.Template); err != nil {
+		log.Printf("Error deleting template for admin %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to delete template",
 			"details": err.Error(),
@@ -361,13 +356,18 @@ func (ch *CloningHandler) DeleteTemplateHandler(c *gin.Context) {
 
 // ADMIN: ToggleTemplateVisibilityHandler handles POST requests for toggling a template's visibility
 func (ch *CloningHandler) ToggleTemplateVisibilityHandler(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("id").(string)
+
 	var req TemplateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
+	if !ValidateAndBind(c, &req) {
 		return
 	}
 
+	log.Printf("Admin %s requested toggling visibility of template %s", username, req.Template)
+
 	if err := ch.Manager.DatabaseService.ToggleTemplateVisibility(req.Template); err != nil {
+		log.Printf("Error toggling template visibility for admin %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to toggle template visibility",
 			"details": err.Error(),
@@ -382,8 +382,14 @@ func (ch *CloningHandler) ToggleTemplateVisibilityHandler(c *gin.Context) {
 
 // ADMIN: UploadTemplateImageHandler handles POST requests for uploading a template's image
 func (ch *CloningHandler) UploadTemplateImageHandler(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("id").(string)
+
+	log.Printf("Admin %s requested uploading a template image", username)
+
 	result, err := ch.Manager.DatabaseService.UploadTemplateImage(c)
 	if err != nil {
+		log.Printf("Error uploading template image for admin %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to upload template image",
 			"details": err.Error(),

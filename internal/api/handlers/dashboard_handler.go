@@ -22,16 +22,6 @@ func NewDashboardHandler(authHandler *AuthHandler, proxmoxHandler *ProxmoxHandle
 	}
 }
 
-// DashboardStats represents the structure of dashboard statistics
-type DashboardStats struct {
-	UserCount              int `json:"users"`
-	GroupCount             int `json:"groups"`
-	PublishedTemplateCount int `json:"published_templates"`
-	DeployedPodCount       int `json:"deployed_pods"`
-	VirtualMachineCount    int `json:"vms"`
-	ClusterResourceUsage   any `json:"cluster"`
-}
-
 // ADMIN: GetDashboardStatsHandler retrieves all dashboard statistics in a single request
 func (dh *DashboardHandler) GetDashboardStatsHandler(c *gin.Context) {
 	stats := DashboardStats{}

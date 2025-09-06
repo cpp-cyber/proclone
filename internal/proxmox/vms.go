@@ -11,7 +11,7 @@ import (
 )
 
 // =================================================
-// PUBLIC FUNCTIONS
+// Public Functions
 // =================================================
 
 func (c *Client) GetVMs() ([]VirtualResource, error) {
@@ -196,7 +196,7 @@ func (c *Client) WaitForRunning(vm VM) error {
 }
 
 // =================================================
-// PRIVATE FUNCTIONS
+// Private Functions
 // =================================================
 
 func (c *Client) vmAction(node string, vmID int, action string) error {

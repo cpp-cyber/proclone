@@ -32,6 +32,8 @@ type Service interface {
 	GetClusterResources(getParams string) ([]VirtualResource, error)
 	GetNodeStatus(nodeName string) (*ProxmoxNodeStatus, error)
 	FindBestNode() (string, error)
+	SyncUsers() error
+	SyncGroups() error
 
 	// Pod Management
 	GetNextPodID(minPodID int, maxPodID int) (string, int, error)

@@ -26,15 +26,15 @@ type Config struct {
 
 // KaminoTemplate represents a template in the system
 type KaminoTemplate struct {
-	Name            string `json:"name"`
-	Description     string `json:"description"`
-	ImagePath       string `json:"image_path"`
+	Name            string `json:"name" binding:"required,min=1,max=100" validate:"alphanum,ascii"`
+	Description     string `json:"description" binding:"required,min=1,max=500"`
+	ImagePath       string `json:"image_path" binding:"omitempty,max=255" validate:"omitempty,file"`
 	TemplateVisible bool   `json:"template_visible"`
 	PodVisible      bool   `json:"pod_visible"`
 	VMsVisible      bool   `json:"vms_visible"`
-	VMCount         int    `json:"vm_count"`
-	Deployments     int    `json:"deployments"`
-	CreatedAt       string `json:"created_at"`
+	VMCount         int    `json:"vm_count" binding:"min=0,max=100"`
+	Deployments     int    `json:"deployments" binding:"min=0"`
+	CreatedAt       string `json:"created_at" binding:"omitempty" validate:"omitempty,datetime=2006-01-02T15:04:05Z07:00"`
 }
 
 // DatabaseService interface defines the methods for template operations

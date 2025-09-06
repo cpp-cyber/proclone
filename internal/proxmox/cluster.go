@@ -8,7 +8,7 @@ import (
 )
 
 // =================================================
-// PUBLIC FUNCTIONS
+// Public Functions
 // =================================================
 
 // GetNodeStatus retrieves detailed status for a specific node
@@ -109,22 +109,16 @@ func (c *Client) FindBestNode() (string, error) {
 	return bestNode, nil
 }
 
-func (c *Client) SyncRealm() error {
-	req := tools.ProxmoxAPIRequest{
-		Method:   "POST",
-		Endpoint: fmt.Sprintf("/access/domains/%s/sync", c.Config.Realm),
-	}
+func (c *Client) SyncUsers() error {
+	return c.syncRealm("users")
+}
 
-	_, err := c.RequestHelper.MakeRequest(req)
-	if err != nil {
-		return fmt.Errorf("failed to sync realm: %w", err)
-	}
-
-	return nil
+func (c *Client) SyncGroups() error {
+	return c.syncRealm("groups")
 }
 
 // =================================================
-// PRIVATE FUNCTIONS
+// Private Functions
 // =================================================
 
 // collectNodeResourceUsage gathers resource usage data for all configured nodes
@@ -222,4 +216,22 @@ func getStorage(resources *[]VirtualResource, storage string) (Used int64, Total
 	}
 
 	return used, total
+}
+
+func (c *Client) syncRealm(scope string) error {
+	req := tools.ProxmoxAPIRequest{
+		Method:   "POST",
+		Endpoint: fmt.Sprintf("/access/domains/%s/sync", c.Config.Realm),
+		RequestBody: map[string]string{
+			"scope":           scope,                  // Either "users" or "groups"
+			"remove-vanished": "acl;properties;entry", // Delete any users/groups that no longer exist in AD
+		},
+	}
+
+	_, err := c.RequestHelper.MakeRequest(req)
+	if err != nil {
+		return fmt.Errorf("failed to sync realm: %w", err)
+	}
+
+	return nil
 }
