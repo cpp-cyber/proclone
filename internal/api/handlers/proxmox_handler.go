@@ -9,11 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ProxmoxHandler handles HTTP requests for Proxmox operations
-type ProxmoxHandler struct {
-	service proxmox.Service
-}
-
 // NewProxmoxHandler creates a new Proxmox handler, loading configuration internally
 func NewProxmoxHandler() (*ProxmoxHandler, error) {
 	proxmoxService, err := proxmox.NewService()
@@ -57,7 +52,7 @@ func (ph *ProxmoxHandler) GetVMsHandler(c *gin.Context) {
 // ADMIN: StartVMHandler handles POST requests for starting a VM on Proxmox
 func (ph *ProxmoxHandler) StartVMHandler(c *gin.Context) {
 	var req VMActionRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 
@@ -73,7 +68,7 @@ func (ph *ProxmoxHandler) StartVMHandler(c *gin.Context) {
 // ADMIN: ShutdownVMHandler handles POST requests for shutting down a VM on Proxmox
 func (ph *ProxmoxHandler) ShutdownVMHandler(c *gin.Context) {
 	var req VMActionRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 
@@ -89,7 +84,7 @@ func (ph *ProxmoxHandler) ShutdownVMHandler(c *gin.Context) {
 // ADMIN: RebootVMHandler handles POST requests for rebooting a VM on Proxmox
 func (ph *ProxmoxHandler) RebootVMHandler(c *gin.Context) {
 	var req VMActionRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 

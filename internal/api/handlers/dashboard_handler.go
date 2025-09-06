@@ -6,13 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// DashboardHandler handles HTTP requests for dashboard operations
-type DashboardHandler struct {
-	authHandler    *AuthHandler
-	proxmoxHandler *ProxmoxHandler
-	cloningHandler *CloningHandler
-}
-
 // NewDashboardHandler creates a new dashboard handler
 func NewDashboardHandler(authHandler *AuthHandler, proxmoxHandler *ProxmoxHandler, cloningHandler *CloningHandler) *DashboardHandler {
 	return &DashboardHandler{
@@ -27,7 +20,7 @@ func (dh *DashboardHandler) GetDashboardStatsHandler(c *gin.Context) {
 	stats := DashboardStats{}
 
 	// Get user count
-	users, err := dh.authHandler.authService.GetUsers()
+	users, err := dh.authHandler.ldapService.GetUsers()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve user count", "details": err.Error()})
 		return
@@ -35,7 +28,7 @@ func (dh *DashboardHandler) GetDashboardStatsHandler(c *gin.Context) {
 	stats.UserCount = len(users)
 
 	// Get group count
-	groups, err := dh.authHandler.authService.GetGroups()
+	groups, err := dh.authHandler.ldapService.GetGroups()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve group count", "details": err.Error()})
 		return
@@ -43,7 +36,7 @@ func (dh *DashboardHandler) GetDashboardStatsHandler(c *gin.Context) {
 	stats.GroupCount = len(groups)
 
 	// Get published template count
-	publishedTemplates, err := dh.cloningHandler.Manager.DatabaseService.GetPublishedTemplates()
+	publishedTemplates, err := dh.cloningHandler.Service.DatabaseService.GetPublishedTemplates()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve published template count", "details": err.Error()})
 		return
@@ -51,7 +44,7 @@ func (dh *DashboardHandler) GetDashboardStatsHandler(c *gin.Context) {
 	stats.PublishedTemplateCount = len(publishedTemplates)
 
 	// Get deployed pod count
-	pods, err := dh.cloningHandler.Manager.GetAllPods()
+	pods, err := dh.cloningHandler.Service.AdminGetPods()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve deployed pod count", "details": err.Error()})
 		return

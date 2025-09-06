@@ -13,7 +13,7 @@ import (
 	"github.com/cpp-cyber/proclone/internal/tools"
 )
 
-func (c *Client) GetPoolVMs(poolName string) ([]VirtualResource, error) {
+func (s *ProxmoxService) GetPoolVMs(poolName string) ([]VirtualResource, error) {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
 		Endpoint: fmt.Sprintf("/pools/%s", poolName),
@@ -22,7 +22,7 @@ func (c *Client) GetPoolVMs(poolName string) ([]VirtualResource, error) {
 	var poolResponse struct {
 		Members []VirtualResource `json:"members"`
 	}
-	if err := c.RequestHelper.MakeRequestAndUnmarshal(req, &poolResponse); err != nil {
+	if err := s.RequestHelper.MakeRequestAndUnmarshal(req, &poolResponse); err != nil {
 		return nil, fmt.Errorf("failed to get pool VMs: %w", err)
 	}
 
@@ -37,7 +37,7 @@ func (c *Client) GetPoolVMs(poolName string) ([]VirtualResource, error) {
 	return vms, nil
 }
 
-func (c *Client) CreateNewPool(poolName string) error {
+func (s *ProxmoxService) CreateNewPool(poolName string) error {
 	reqBody := map[string]string{
 		"poolid": poolName,
 	}
@@ -48,7 +48,7 @@ func (c *Client) CreateNewPool(poolName string) error {
 		RequestBody: reqBody,
 	}
 
-	_, err := c.RequestHelper.MakeRequest(req)
+	_, err := s.RequestHelper.MakeRequest(req)
 	if err != nil {
 		return fmt.Errorf("failed to create pool %s: %w", poolName, err)
 	}
@@ -56,7 +56,7 @@ func (c *Client) CreateNewPool(poolName string) error {
 	return nil
 }
 
-func (c *Client) SetPoolPermission(poolName string, targetName string, isGroup bool) error {
+func (s *ProxmoxService) SetPoolPermission(poolName string, targetName string, isGroup bool) error {
 	reqBody := map[string]any{
 		"path":      fmt.Sprintf("/pool/%s", poolName),
 		"roles":     "PVEVMUser,PVEPoolUser",
@@ -64,9 +64,9 @@ func (c *Client) SetPoolPermission(poolName string, targetName string, isGroup b
 	}
 
 	if isGroup {
-		reqBody["groups"] = fmt.Sprintf("%s-%s", targetName, c.Config.Realm)
+		reqBody["groups"] = fmt.Sprintf("%s-%s", targetName, s.Config.Realm)
 	} else {
-		reqBody["users"] = fmt.Sprintf("%s@%s", targetName, c.Config.Realm)
+		reqBody["users"] = fmt.Sprintf("%s@%s", targetName, s.Config.Realm)
 	}
 
 	req := tools.ProxmoxAPIRequest{
@@ -75,7 +75,7 @@ func (c *Client) SetPoolPermission(poolName string, targetName string, isGroup b
 		RequestBody: reqBody,
 	}
 
-	_, err := c.RequestHelper.MakeRequest(req)
+	_, err := s.RequestHelper.MakeRequest(req)
 	if err != nil {
 		return fmt.Errorf("failed to set pool permissions: %w", err)
 	}
@@ -83,13 +83,13 @@ func (c *Client) SetPoolPermission(poolName string, targetName string, isGroup b
 	return nil
 }
 
-func (c *Client) DeletePool(poolName string) error {
+func (s *ProxmoxService) DeletePool(poolName string) error {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "DELETE",
 		Endpoint: fmt.Sprintf("/pools/%s", poolName),
 	}
 
-	_, err := c.RequestHelper.MakeRequest(req)
+	_, err := s.RequestHelper.MakeRequest(req)
 	if err != nil {
 		return fmt.Errorf("failed to delete pool %s: %w", poolName, err)
 	}
@@ -98,7 +98,7 @@ func (c *Client) DeletePool(poolName string) error {
 	return nil
 }
 
-func (c *Client) GetTemplatePools() ([]string, error) {
+func (s *ProxmoxService) GetTemplatePools() ([]string, error) {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
 		Endpoint: "/pools",
@@ -107,7 +107,7 @@ func (c *Client) GetTemplatePools() ([]string, error) {
 	var poolResponse []struct {
 		Name string `json:"poolid"`
 	}
-	if err := c.RequestHelper.MakeRequestAndUnmarshal(req, &poolResponse); err != nil {
+	if err := s.RequestHelper.MakeRequestAndUnmarshal(req, &poolResponse); err != nil {
 		return nil, fmt.Errorf("failed to get template pools: %w", err)
 	}
 
@@ -121,8 +121,8 @@ func (c *Client) GetTemplatePools() ([]string, error) {
 	return templatePools, nil
 }
 
-func (c *Client) IsPoolEmpty(poolName string) (bool, error) {
-	poolVMs, err := c.GetPoolVMs(poolName)
+func (s *ProxmoxService) IsPoolEmpty(poolName string) (bool, error) {
+	poolVMs, err := s.GetPoolVMs(poolName)
 	if err != nil {
 		return false, fmt.Errorf("failed to check if pool %s is empty: %w", poolName, err)
 	}
@@ -138,14 +138,13 @@ func (c *Client) IsPoolEmpty(poolName string) (bool, error) {
 	return vmCount == 0, nil
 }
 
-// WaitForPoolEmpty waits for a pool to become empty with exponential backoff
-func (c *Client) WaitForPoolEmpty(poolName string, timeout time.Duration) error {
+func (s *ProxmoxService) WaitForPoolEmpty(poolName string, timeout time.Duration) error {
 	start := time.Now()
 	backoff := 2 * time.Second
 	maxBackoff := 30 * time.Second
 
 	for time.Since(start) < timeout {
-		poolVMs, err := c.GetPoolVMs(poolName)
+		poolVMs, err := s.GetPoolVMs(poolName)
 		if err != nil {
 			// If we can't get pool VMs, pool might be deleted or empty
 			log.Printf("Error checking pool %s (might be deleted): %v", poolName, err)
@@ -165,8 +164,7 @@ func (c *Client) WaitForPoolEmpty(poolName string, timeout time.Duration) error 
 	return fmt.Errorf("timeout waiting for pool %s to become empty after %v", poolName, timeout)
 }
 
-// GetNextPodID finds the next available pod ID between MIN_POD_ID and MAX_POD_ID
-func (c *Client) GetNextPodID(minPodID int, maxPodID int) (string, int, error) {
+func (s *ProxmoxService) GetNextPodID(minPodID int, maxPodID int) (string, int, error) {
 	// Get all existing pools
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
@@ -176,7 +174,7 @@ func (c *Client) GetNextPodID(minPodID int, maxPodID int) (string, int, error) {
 	var poolsResponse []struct {
 		PoolID string `json:"poolid"`
 	}
-	if err := c.RequestHelper.MakeRequestAndUnmarshal(req, &poolsResponse); err != nil {
+	if err := s.RequestHelper.MakeRequestAndUnmarshal(req, &poolsResponse); err != nil {
 		return "", 0, fmt.Errorf("failed to get existing pools: %w", err)
 	}
 

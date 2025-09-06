@@ -3,19 +3,46 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/cpp-cyber/proclone/internal/auth"
+	"github.com/cpp-cyber/proclone/internal/api/auth"
 	"github.com/cpp-cyber/proclone/internal/cloning"
+	"github.com/cpp-cyber/proclone/internal/ldap"
 	"github.com/cpp-cyber/proclone/internal/proxmox"
+	"github.com/cpp-cyber/proclone/internal/tools"
 	"github.com/gin-gonic/gin"
 )
 
-// API endpoint request structures
+// =================================================
+// Handler Types
+// =================================================
 
 // AuthHandler handles HTTP authentication requests
 type AuthHandler struct {
 	authService    auth.Service
+	ldapService    ldap.Service
 	proxmoxService proxmox.Service
 }
+
+// CloningHandler holds the cloning service
+type CloningHandler struct {
+	Service  *cloning.CloningService
+	dbClient *tools.DBClient
+}
+
+// DashboardHandler handles HTTP requests for dashboard operations
+type DashboardHandler struct {
+	authHandler    *AuthHandler
+	proxmoxHandler *ProxmoxHandler
+	cloningHandler *CloningHandler
+}
+
+// ProxmoxHandler handles HTTP requests for Proxmox operations
+type ProxmoxHandler struct {
+	service proxmox.Service
+}
+
+// =================================================
+// API Request Types
+// =================================================
 
 type VMActionRequest struct {
 	Node string `json:"node" binding:"required,min=1,max=100" validate:"alphanum"`
@@ -52,13 +79,13 @@ type AdminDeletePodRequest struct {
 	Pods []string `json:"pods" binding:"required,min=1,dive,min=1,max=100" validate:"dive,alphanum,ascii"`
 }
 
-type UserRequest struct {
-	Username string `json:"username" binding:"required,min=3,max=50" validate:"alphanum,ascii"`
+type UsernamePasswordRequest struct {
+	Username string `json:"username" binding:"required,min=3,max=20" validate:"alphanum,ascii"`
 	Password string `json:"password" binding:"required,min=8,max=128"`
 }
 
 type AdminCreateUserRequest struct {
-	Users []UserRequest `json:"users" binding:"required,min=1,max=100,dive"`
+	Users []UsernamePasswordRequest `json:"users" binding:"required,min=1,max=100,dive"`
 }
 
 type UsersRequest struct {
@@ -71,7 +98,7 @@ type ModifyGroupMembersRequest struct {
 }
 
 type SetUserGroupsRequest struct {
-	Username string   `json:"username" binding:"required,min=3,max=50" validate:"alphanum,ascii"`
+	Username string   `json:"username" binding:"required,min=3,max=20" validate:"alphanum,ascii"`
 	Groups   []string `json:"groups" binding:"required,min=1,dive,min=1,max=100" validate:"dive,alphanum,ascii"`
 }
 
@@ -89,7 +116,11 @@ type DashboardStats struct {
 	ClusterResourceUsage   any `json:"cluster"`
 }
 
-func ValidateAndBind(c *gin.Context, obj any) bool {
+// =================================================
+// Private Functions
+// =================================================
+
+func validateAndBind(c *gin.Context, obj any) bool {
 	if err := c.ShouldBindJSON(obj); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Validation failed",

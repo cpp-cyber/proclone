@@ -5,7 +5,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/cpp-cyber/proclone/internal/auth"
+	"github.com/cpp-cyber/proclone/internal/api/auth"
+	"github.com/cpp-cyber/proclone/internal/ldap"
 	"github.com/cpp-cyber/proclone/internal/proxmox"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -17,9 +18,14 @@ import (
 
 // NewAuthHandler creates a new authentication handler
 func NewAuthHandler() (*AuthHandler, error) {
-	authService, err := auth.NewLDAPService()
+	authService, err := auth.NewAuthService()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create auth service: %w", err)
+	}
+
+	ldapService, err := ldap.NewLDAPService()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create LDAP service: %w", err)
 	}
 
 	proxmoxService, err := proxmox.NewService()
@@ -31,14 +37,15 @@ func NewAuthHandler() (*AuthHandler, error) {
 
 	return &AuthHandler{
 		authService:    authService,
+		ldapService:    ldapService,
 		proxmoxService: proxmoxService,
 	}, nil
 }
 
 // LoginHandler handles the login POST request
 func (h *AuthHandler) LoginHandler(c *gin.Context) {
-	var req UserRequest
-	if !ValidateAndBind(c, &req) {
+	var req UsernamePasswordRequest
+	if !validateAndBind(c, &req) {
 		return
 	}
 
@@ -115,14 +122,14 @@ func (h *AuthHandler) SessionHandler(c *gin.Context) {
 }
 
 func (h *AuthHandler) RegisterHandler(c *gin.Context) {
-	var req UserRequest
-	if !ValidateAndBind(c, &req) {
+	var req UsernamePasswordRequest
+	if !validateAndBind(c, &req) {
 		return
 	}
 
 	// Check if the username already exists
 	var userDN = ""
-	userDN, err := h.authService.GetUserDN(req.Username)
+	userDN, err := h.ldapService.GetUserDN(req.Username)
 	if userDN != "" {
 		c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
 		return
@@ -132,7 +139,7 @@ func (h *AuthHandler) RegisterHandler(c *gin.Context) {
 	}
 
 	// Create user
-	if err := h.authService.CreateAndRegisterUser(auth.UserRegistrationInfo(req)); err != nil {
+	if err := h.ldapService.CreateAndRegisterUser(ldap.UserRegistrationInfo(req)); err != nil {
 		log.Printf("Failed to create user %s: %v", req.Username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
@@ -147,7 +154,7 @@ func (h *AuthHandler) RegisterHandler(c *gin.Context) {
 
 // ADMIN: GetUsersHandler returns a list of all users
 func (h *AuthHandler) GetUsersHandler(c *gin.Context) {
-	users, err := h.authService.GetUsers()
+	users, err := h.ldapService.GetUsers()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve users"})
 		return
@@ -175,7 +182,7 @@ func (h *AuthHandler) GetUsersHandler(c *gin.Context) {
 // ADMIN: CreateUsersHandler creates new user(s)
 func (h *AuthHandler) CreateUsersHandler(c *gin.Context) {
 	var req AdminCreateUserRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 
@@ -183,7 +190,7 @@ func (h *AuthHandler) CreateUsersHandler(c *gin.Context) {
 
 	// Create users in AD
 	for _, user := range req.Users {
-		if err := h.authService.CreateAndRegisterUser(auth.UserRegistrationInfo(user)); err != nil {
+		if err := h.ldapService.CreateAndRegisterUser(ldap.UserRegistrationInfo(user)); err != nil {
 			errors = append(errors, fmt.Errorf("failed to create user %s: %v", user.Username, err))
 		}
 	}
@@ -205,7 +212,7 @@ func (h *AuthHandler) CreateUsersHandler(c *gin.Context) {
 // ADMIN: DeleteUsersHandler deletes existing user(s)
 func (h *AuthHandler) DeleteUsersHandler(c *gin.Context) {
 	var req UsersRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 
@@ -213,7 +220,7 @@ func (h *AuthHandler) DeleteUsersHandler(c *gin.Context) {
 
 	// Delete users in AD
 	for _, username := range req.Usernames {
-		if err := h.authService.DeleteUser(username); err != nil {
+		if err := h.ldapService.DeleteUser(username); err != nil {
 			errors = append(errors, fmt.Errorf("failed to delete user %s: %v", username, err))
 		}
 	}
@@ -235,14 +242,14 @@ func (h *AuthHandler) DeleteUsersHandler(c *gin.Context) {
 // ADMIN: EnableUsersHandler enables existing user(s)
 func (h *AuthHandler) EnableUsersHandler(c *gin.Context) {
 	var req UsersRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 
 	var errors []error
 
 	for _, username := range req.Usernames {
-		if err := h.authService.EnableUserAccount(username); err != nil {
+		if err := h.ldapService.EnableUserAccount(username); err != nil {
 			errors = append(errors, fmt.Errorf("failed to enable user %s: %v", username, err))
 		}
 	}
@@ -258,14 +265,14 @@ func (h *AuthHandler) EnableUsersHandler(c *gin.Context) {
 // ADMIN: DisableUsersHandler disables existing user(s)
 func (h *AuthHandler) DisableUsersHandler(c *gin.Context) {
 	var req UsersRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 
 	var errors []error
 
 	for _, username := range req.Usernames {
-		if err := h.authService.DisableUserAccount(username); err != nil {
+		if err := h.ldapService.DisableUserAccount(username); err != nil {
 			errors = append(errors, fmt.Errorf("failed to disable user %s: %v", username, err))
 		}
 	}
@@ -279,17 +286,17 @@ func (h *AuthHandler) DisableUsersHandler(c *gin.Context) {
 }
 
 // =================================================
-// Group Functions
+// Group Handlers
 // =================================================
 
 // ADMIN: SetUserGroupsHandler sets the groups for an existing user
 func (h *AuthHandler) SetUserGroupsHandler(c *gin.Context) {
 	var req SetUserGroupsRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 
-	if err := h.authService.SetUserGroups(req.Username, req.Groups); err != nil {
+	if err := h.ldapService.SetUserGroups(req.Username, req.Groups); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set user groups", "details": err.Error()})
 		return
 	}
@@ -298,7 +305,7 @@ func (h *AuthHandler) SetUserGroupsHandler(c *gin.Context) {
 }
 
 func (h *AuthHandler) GetGroupsHandler(c *gin.Context) {
-	groups, err := h.authService.GetGroups()
+	groups, err := h.ldapService.GetGroups()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve groups"})
 		return
@@ -313,7 +320,7 @@ func (h *AuthHandler) GetGroupsHandler(c *gin.Context) {
 // ADMIN: CreateGroupsHandler creates new group(s)
 func (h *AuthHandler) CreateGroupsHandler(c *gin.Context) {
 	var req GroupsRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 
@@ -321,7 +328,7 @@ func (h *AuthHandler) CreateGroupsHandler(c *gin.Context) {
 
 	// Create groups in AD
 	for _, group := range req.Groups {
-		if err := h.authService.CreateGroup(group); err != nil {
+		if err := h.ldapService.CreateGroup(group); err != nil {
 			errors = append(errors, fmt.Errorf("failed to create group %s: %v", group, err))
 		}
 	}
@@ -342,11 +349,11 @@ func (h *AuthHandler) CreateGroupsHandler(c *gin.Context) {
 
 func (h *AuthHandler) RenameGroupHandler(c *gin.Context) {
 	var req RenameGroupRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 
-	if err := h.authService.RenameGroup(req.OldName, req.NewName); err != nil {
+	if err := h.ldapService.RenameGroup(req.OldName, req.NewName); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to rename group"})
 		return
 	}
@@ -356,7 +363,7 @@ func (h *AuthHandler) RenameGroupHandler(c *gin.Context) {
 
 func (h *AuthHandler) DeleteGroupsHandler(c *gin.Context) {
 	var req GroupsRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 
@@ -364,7 +371,7 @@ func (h *AuthHandler) DeleteGroupsHandler(c *gin.Context) {
 
 	// Delete groups in AD
 	for _, group := range req.Groups {
-		if err := h.authService.DeleteGroup(group); err != nil {
+		if err := h.ldapService.DeleteGroup(group); err != nil {
 			errors = append(errors, fmt.Errorf("failed to delete group %s: %v", group, err))
 		}
 	}
@@ -385,11 +392,11 @@ func (h *AuthHandler) DeleteGroupsHandler(c *gin.Context) {
 
 func (h *AuthHandler) AddUsersHandler(c *gin.Context) {
 	var req ModifyGroupMembersRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 
-	if err := h.authService.AddUsersToGroup(req.Group, req.Usernames); err != nil {
+	if err := h.ldapService.AddUsersToGroup(req.Group, req.Usernames); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add users to group"})
 		return
 	}
@@ -399,11 +406,11 @@ func (h *AuthHandler) AddUsersHandler(c *gin.Context) {
 
 func (h *AuthHandler) RemoveUsersHandler(c *gin.Context) {
 	var req ModifyGroupMembersRequest
-	if !ValidateAndBind(c, &req) {
+	if !validateAndBind(c, &req) {
 		return
 	}
 
-	if err := h.authService.RemoveUsersFromGroup(req.Group, req.Usernames); err != nil {
+	if err := h.ldapService.RemoveUsersFromGroup(req.Group, req.Usernames); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove users from group"})
 		return
 	}

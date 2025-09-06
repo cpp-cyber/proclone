@@ -12,14 +12,14 @@ import (
 // =================================================
 
 // GetNodeStatus retrieves detailed status for a specific node
-func (c *Client) GetNodeStatus(nodeName string) (*ProxmoxNodeStatus, error) {
+func (s *ProxmoxService) GetNodeStatus(nodeName string) (*ProxmoxNodeStatus, error) {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
 		Endpoint: fmt.Sprintf("/nodes/%s/status", nodeName),
 	}
 
 	var nodeStatus ProxmoxNodeStatus
-	if err := c.RequestHelper.MakeRequestAndUnmarshal(req, &nodeStatus); err != nil {
+	if err := s.RequestHelper.MakeRequestAndUnmarshal(req, &nodeStatus); err != nil {
 		return nil, fmt.Errorf("failed to get node status for %s: %w", nodeName, err)
 	}
 
@@ -27,14 +27,14 @@ func (c *Client) GetNodeStatus(nodeName string) (*ProxmoxNodeStatus, error) {
 }
 
 // GetClusterResources retrieves all cluster resources from the Proxmox cluster
-func (c *Client) GetClusterResources(getParams string) ([]VirtualResource, error) {
+func (s *ProxmoxService) GetClusterResources(getParams string) ([]VirtualResource, error) {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
 		Endpoint: fmt.Sprintf("/cluster/resources?%s", getParams),
 	}
 
 	var resources []VirtualResource
-	if err := c.RequestHelper.MakeRequestAndUnmarshal(req, &resources); err != nil {
+	if err := s.RequestHelper.MakeRequestAndUnmarshal(req, &resources); err != nil {
 		return nil, fmt.Errorf("failed to get cluster resources: %w", err)
 	}
 
@@ -42,14 +42,14 @@ func (c *Client) GetClusterResources(getParams string) ([]VirtualResource, error
 }
 
 // GetClusterResourceUsage retrieves resource usage for the Proxmox cluster
-func (c *Client) GetClusterResourceUsage() (*ClusterResourceUsageResponse, error) {
-	resources, err := c.GetClusterResources("")
+func (s *ProxmoxService) GetClusterResourceUsage() (*ClusterResourceUsageResponse, error) {
+	resources, err := s.GetClusterResources("")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cluster resources: %w", err)
 	}
 
-	nodes, errors := c.collectNodeResourceUsage(resources)
-	cluster := c.aggregateClusterResourceUsage(nodes, resources)
+	nodes, errors := s.collectNodeResourceUsage(resources)
+	cluster := s.aggregateClusterResourceUsage(nodes, resources)
 
 	response := &ClusterResourceUsageResponse{
 		Nodes:  nodes,
@@ -66,7 +66,7 @@ func (c *Client) GetClusterResourceUsage() (*ClusterResourceUsageResponse, error
 }
 
 // FindBestNode finds the node with the most available resources
-func (c *Client) FindBestNode() (string, error) {
+func (s *ProxmoxService) FindBestNode() (string, error) {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
 		Endpoint: "/nodes",
@@ -81,7 +81,7 @@ func (c *Client) FindBestNode() (string, error) {
 		MaxMem int64   `json:"maxmem"`
 	}
 
-	if err := c.RequestHelper.MakeRequestAndUnmarshal(req, &nodesResponse); err != nil {
+	if err := s.RequestHelper.MakeRequestAndUnmarshal(req, &nodesResponse); err != nil {
 		return "", fmt.Errorf("failed to get nodes: %w", err)
 	}
 
@@ -109,12 +109,12 @@ func (c *Client) FindBestNode() (string, error) {
 	return bestNode, nil
 }
 
-func (c *Client) SyncUsers() error {
-	return c.syncRealm("users")
+func (s *ProxmoxService) SyncUsers() error {
+	return s.syncRealm("users")
 }
 
-func (c *Client) SyncGroups() error {
-	return c.syncRealm("groups")
+func (s *ProxmoxService) SyncGroups() error {
+	return s.syncRealm("groups")
 }
 
 // =================================================
@@ -122,12 +122,12 @@ func (c *Client) SyncGroups() error {
 // =================================================
 
 // collectNodeResourceUsage gathers resource usage data for all configured nodes
-func (c *Client) collectNodeResourceUsage(resources []VirtualResource) ([]NodeResourceUsage, []string) {
+func (s *ProxmoxService) collectNodeResourceUsage(resources []VirtualResource) ([]NodeResourceUsage, []string) {
 	var nodes []NodeResourceUsage
 	var errors []string
 
-	for _, nodeName := range c.Config.Nodes {
-		nodeUsage, err := c.getNodeResourceUsage(nodeName, resources)
+	for _, nodeName := range s.Config.Nodes {
+		nodeUsage, err := s.getNodeResourceUsage(nodeName, resources)
 		if err != nil {
 			errorMsg := fmt.Sprintf("Error fetching status for node %s: %v", nodeName, err)
 			log.Printf("%s", errorMsg)
@@ -141,8 +141,8 @@ func (c *Client) collectNodeResourceUsage(resources []VirtualResource) ([]NodeRe
 }
 
 // getNodeResourceUsage retrieves resource usage for a single node
-func (c *Client) getNodeResourceUsage(nodeName string, resources []VirtualResource) (NodeResourceUsage, error) {
-	status, err := c.GetNodeStatus(nodeName)
+func (s *ProxmoxService) getNodeResourceUsage(nodeName string, resources []VirtualResource) (NodeResourceUsage, error) {
+	status, err := s.GetNodeStatus(nodeName)
 	if err != nil {
 		return NodeResourceUsage{}, fmt.Errorf("failed to get node status: %w", err)
 	}
@@ -162,7 +162,7 @@ func (c *Client) getNodeResourceUsage(nodeName string, resources []VirtualResour
 }
 
 // aggregateClusterResourceUsage calculates cluster-wide resource totals and averages
-func (c *Client) aggregateClusterResourceUsage(nodes []NodeResourceUsage, resources []VirtualResource) ResourceUsage {
+func (s *ProxmoxService) aggregateClusterResourceUsage(nodes []NodeResourceUsage, resources []VirtualResource) ResourceUsage {
 	cluster := ResourceUsage{}
 
 	// Aggregate node resources
@@ -218,17 +218,17 @@ func getStorage(resources *[]VirtualResource, storage string) (Used int64, Total
 	return used, total
 }
 
-func (c *Client) syncRealm(scope string) error {
+func (s *ProxmoxService) syncRealm(scope string) error {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "POST",
-		Endpoint: fmt.Sprintf("/access/domains/%s/sync", c.Config.Realm),
+		Endpoint: fmt.Sprintf("/access/domains/%s/sync", s.Config.Realm),
 		RequestBody: map[string]string{
 			"scope":           scope,                  // Either "users" or "groups"
 			"remove-vanished": "acl;properties;entry", // Delete any users/groups that no longer exist in AD
 		},
 	}
 
-	_, err := c.RequestHelper.MakeRequest(req)
+	_, err := s.RequestHelper.MakeRequest(req)
 	if err != nil {
 		return fmt.Errorf("failed to sync realm: %w", err)
 	}

@@ -1,6 +1,90 @@
 package proxmox
 
-// VirtualResourceConfig represents VM configuration response
+import (
+	"net/http"
+	"time"
+
+	"github.com/cpp-cyber/proclone/internal/tools"
+)
+
+// ProxmoxConfig holds the configuration for Proxmox API
+type ProxmoxConfig struct {
+	Host         string   `envconfig:"PROXMOX_HOST" required:"true"`
+	Port         string   `envconfig:"PROXMOX_PORT" default:"8006"`
+	TokenID      string   `envconfig:"PROXMOX_TOKEN_ID" required:"true"`
+	TokenSecret  string   `envconfig:"PROXMOX_TOKEN_SECRET" required:"true"`
+	VerifySSL    bool     `envconfig:"PROXMOX_VERIFY_SSL" default:"false"`
+	CriticalPool string   `envconfig:"PROXMOX_CRITICAL_POOL"`
+	Realm        string   `envconfig:"REALM"`
+	NodesStr     string   `envconfig:"PROXMOX_NODES"`
+	Nodes        []string // Parsed from NodesStr
+	APIToken     string   // Computed from TokenID and TokenSecret
+}
+
+// Service interface defines the methods for Proxmox operations
+type Service interface {
+	// Cluster and Resource Management
+	GetClusterResourceUsage() (*ClusterResourceUsageResponse, error)
+	GetClusterResources(getParams string) ([]VirtualResource, error)
+	GetNodeStatus(nodeName string) (*ProxmoxNodeStatus, error)
+	FindBestNode() (string, error)
+	SyncUsers() error
+	SyncGroups() error
+
+	// Pod Management
+	GetNextPodID(minPodID int, maxPodID int) (string, int, error)
+
+	// VM Management
+	GetVMs() ([]VirtualResource, error)
+	StartVM(node string, vmID int) error
+	ShutdownVM(node string, vmID int) error
+	RebootVM(node string, vmID int) error
+	StopVM(node string, vmID int) error
+	DeleteVM(node string, vmID int) error
+	ConvertVMToTemplate(node string, vmID int) error
+	CloneVM(sourceVM VM, newPoolName string) (*VM, error)
+	WaitForCloneCompletion(vm *VM, timeout time.Duration) error
+	WaitForDisk(node string, vmid int, maxWait time.Duration) error
+	WaitForRunning(vm VM) error
+	WaitForStopped(vm VM) error
+
+	// Pool Management
+	GetPoolVMs(poolName string) ([]VirtualResource, error)
+	CreateNewPool(poolName string) error
+	SetPoolPermission(poolName string, targetName string, isGroup bool) error
+	DeletePool(poolName string) error
+	IsPoolEmpty(poolName string) (bool, error)
+	WaitForPoolEmpty(poolName string, timeout time.Duration) error
+
+	// Template Management
+	GetTemplatePools() ([]string, error)
+
+	// Internal access for router functionality
+	GetRequestHelper() *tools.ProxmoxRequestHelper
+}
+
+// ProxmoxService implements the Service interface for Proxmox operations
+type ProxmoxService struct {
+	Config        *ProxmoxConfig
+	HTTPClient    *http.Client
+	BaseURL       string
+	RequestHelper *tools.ProxmoxRequestHelper
+}
+
+type ProxmoxNode struct {
+	Node   string `json:"node"`
+	Status string `json:"status"`
+}
+
+type ProxmoxNodeStatus struct {
+	CPU    float64 `json:"cpu"`
+	Memory struct {
+		Total int64 `json:"total"`
+		Used  int64 `json:"used"`
+	} `json:"memory"`
+	Uptime int64 `json:"uptime"`
+}
+
 type VirtualResourceConfig struct {
 	HardDisk string `json:"scsi0"`
 	Lock     string `json:"lock,omitempty"`
@@ -8,17 +92,14 @@ type VirtualResourceConfig struct {
 	Net1     string `json:"net1,omitempty"`
 }
 
-// VirtualResourceStatus represents the status of a virtual resource
 type VirtualResourceStatus struct {
 	Status string `json:"status"`
 }
 
-// VNetResponse represents the VNet API response
 type VNetResponse []struct {
 	VNet string `json:"vnet"`
 }
 
-// VM represents a Virtual Machine with node and ID information
 type VM struct {
 	Name string `json:"name,omitempty"`
 	Node string `json:"node"`
@@ -52,13 +133,11 @@ type ResourceUsage struct {
 	StorageTotal int64   `json:"storage_total"` // Total storage in bytes
 }
 
-// NodeResourceUsage represents the resource usage metrics for a single node
 type NodeResourceUsage struct {
 	Name      string        `json:"name"`
 	Resources ResourceUsage `json:"resources"`
 }
 
-// ResourceUsageResponse represents the API response containing resource usage for all nodes
 type ClusterResourceUsageResponse struct {
 	Total  ResourceUsage       `json:"total"`
 	Nodes  []NodeResourceUsage `json:"nodes"`

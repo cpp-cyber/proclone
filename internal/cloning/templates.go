@@ -15,51 +15,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Utils
-
-// buildTemplates builds template structs from SQL rows
-func (c *TemplateClient) buildTemplates(rows *sql.Rows) ([]KaminoTemplate, error) {
-	templates := []KaminoTemplate{}
-
-	for rows.Next() {
-		var template KaminoTemplate
-		err := rows.Scan(
-			&template.Name,
-			&template.Description,
-			&template.ImagePath,
-			&template.TemplateVisible,
-			&template.PodVisible,
-			&template.VMsVisible,
-			&template.VMCount,
-			&template.Deployments,
-			&template.CreatedAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-		templates = append(templates, template)
-	}
-
-	return templates, nil
-}
-
-// Use a map to define allowed MIME types for better performance
-// and to avoid using a switch statement
-var allowedMIMEs = map[string]struct{}{
-	"image/jpeg": {},
-	"image/png":  {},
-}
-
-// detectMIME reads a small buffer to determine the file's MIME type
-func detectMIME(f multipart.File) (string, error) {
-	buffer := make([]byte, 512)
-	if _, err := f.Read(buffer); err != nil && err != io.EOF {
-		return "", err
-	}
-	return http.DetectContentType(buffer), nil
-}
-
-// Database Operations
+// =================================================
+// Template Database Operations
+// =================================================
 
 func (c *TemplateClient) GetTemplates() ([]KaminoTemplate, error) {
 	query := "SELECT * FROM templates WHERE template_visible = true ORDER BY created_at DESC"
@@ -194,15 +152,15 @@ func (c *TemplateClient) GetTemplateInfo(templateName string) (KaminoTemplate, e
 	return template, nil
 }
 
-func (cm *CloningManager) GetUnpublishedTemplates() ([]string, error) {
+func (cs *CloningService) GetUnpublishedTemplates() ([]string, error) {
 	// Gets published templates from the database
-	publishedTemplates, err := cm.DatabaseService.GetPublishedTemplates()
+	publishedTemplates, err := cs.DatabaseService.GetPublishedTemplates()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get unpublished templates: %w", err)
 	}
 
 	// Gets pools that start with "kamino_template_" in Proxmox
-	proxmoxTemplate, err := cm.ProxmoxService.GetTemplatePools()
+	proxmoxTemplate, err := cs.ProxmoxService.GetTemplatePools()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get Proxmox templates: %w", err)
 	}
@@ -227,14 +185,14 @@ func (cm *CloningManager) GetUnpublishedTemplates() ([]string, error) {
 	return unpublished, nil
 }
 
-func (cm *CloningManager) PublishTemplate(template KaminoTemplate) error {
+func (cs *CloningService) PublishTemplate(template KaminoTemplate) error {
 	// Insert template information into database
-	if err := cm.DatabaseService.InsertTemplate(template); err != nil {
+	if err := cs.DatabaseService.InsertTemplate(template); err != nil {
 		return fmt.Errorf("failed to publish template: %w", err)
 	}
 
 	// Get all VMs in pool
-	vms, err := cm.ProxmoxService.GetPoolVMs("kamino_template_" + template.Name)
+	vms, err := cs.ProxmoxService.GetPoolVMs("kamino_template_" + template.Name)
 	if err != nil {
 		log.Printf("Error retrieving VMs in pool: %v", err)
 		return fmt.Errorf("failed to get VMs in pool: %w", err)
@@ -242,7 +200,7 @@ func (cm *CloningManager) PublishTemplate(template KaminoTemplate) error {
 
 	// Convert all VMs to templates
 	for _, vm := range vms {
-		if err := cm.ProxmoxService.ConvertVMToTemplate(vm.NodeName, vm.VmId); err != nil {
+		if err := cs.ProxmoxService.ConvertVMToTemplate(vm.NodeName, vm.VmId); err != nil {
 			log.Printf("Error converting VM %d to template: %v", vm.VmId, err)
 			return fmt.Errorf("failed to convert VM to template: %w", err)
 		}
@@ -251,7 +209,9 @@ func (cm *CloningManager) PublishTemplate(template KaminoTemplate) error {
 	return nil
 }
 
+// =================================================
 // Template Image Operations
+// =================================================
 
 func (cl *TemplateClient) UploadTemplateImage(c *gin.Context) (*UploadResult, error) {
 	// Check header for multipart/form-data
@@ -320,4 +280,42 @@ func (c *TemplateClient) DeleteImage(imagePath string) error {
 		return fmt.Errorf("failed to delete image: %w", err)
 	}
 	return nil
+}
+
+// =================================================
+// Private Functions
+// =================================================
+
+func (c *TemplateClient) buildTemplates(rows *sql.Rows) ([]KaminoTemplate, error) {
+	templates := []KaminoTemplate{}
+
+	for rows.Next() {
+		var template KaminoTemplate
+		err := rows.Scan(
+			&template.Name,
+			&template.Description,
+			&template.ImagePath,
+			&template.TemplateVisible,
+			&template.PodVisible,
+			&template.VMsVisible,
+			&template.VMCount,
+			&template.Deployments,
+			&template.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+		templates = append(templates, template)
+	}
+
+	return templates, nil
+}
+
+// detectMIME reads a small buffer to determine the file's MIME type
+func detectMIME(f multipart.File) (string, error) {
+	buffer := make([]byte, 512)
+	if _, err := f.Read(buffer); err != nil && err != io.EOF {
+		return "", err
+	}
+	return http.DetectContentType(buffer), nil
 }

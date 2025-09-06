@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/cpp-cyber/proclone/internal/auth"
+	"github.com/cpp-cyber/proclone/internal/ldap"
 	"github.com/cpp-cyber/proclone/internal/proxmox"
 	"github.com/gin-gonic/gin"
 )
@@ -72,12 +72,12 @@ type TemplateClient struct {
 	TemplateConfig *TemplateConfig
 }
 
-// CloningManager combines Proxmox service and templates database functionality
+// CloningService combines Proxmox service and templates database functionality
 // for handling VM cloning operations
-type CloningManager struct {
+type CloningService struct {
 	ProxmoxService  proxmox.Service
 	DatabaseService DatabaseService
-	LDAPService     auth.Service
+	LDAPService     ldap.Service
 	Config          *Config
 }
 
@@ -91,4 +91,9 @@ type Pod struct {
 	Name     string                    `json:"name"`
 	VMs      []proxmox.VirtualResource `json:"vms"`
 	Template KaminoTemplate            `json:"template,omitempty"`
+}
+
+var allowedMIMEs = map[string]struct{}{
+	"image/jpeg": {},
+	"image/png":  {},
 }

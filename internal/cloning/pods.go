@@ -8,15 +8,15 @@ import (
 	"github.com/cpp-cyber/proclone/internal/proxmox"
 )
 
-func (cm *CloningManager) GetPods(username string) ([]Pod, error) {
+func (cs *CloningService) GetPods(username string) ([]Pod, error) {
 	// Get User DN
-	userDN, err := cm.LDAPService.GetUserDN(username)
+	userDN, err := cs.LDAPService.GetUserDN(username)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user DN: %w", err)
 	}
 
 	// Get user's groups
-	groups, err := cm.LDAPService.GetUserGroups(userDN)
+	groups, err := cs.LDAPService.GetUserGroups(userDN)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user groups: %w", err)
 	}
@@ -25,24 +25,24 @@ func (cm *CloningManager) GetPods(username string) ([]Pod, error) {
 	regexPattern := fmt.Sprintf(`1[0-9]{3}_.*_(%s|%s)`, username, strings.Join(groups, "|"))
 
 	// Get pods based on regex pattern
-	pods, err := cm.MapVirtualResourcesToPods(regexPattern)
+	pods, err := cs.MapVirtualResourcesToPods(regexPattern)
 	if err != nil {
 		return nil, err
 	}
 	return pods, nil
 }
 
-func (cm *CloningManager) GetAllPods() ([]Pod, error) {
-	pods, err := cm.MapVirtualResourcesToPods(`1[0-9]{3}_.*`)
+func (cs *CloningService) AdminGetPods() ([]Pod, error) {
+	pods, err := cs.MapVirtualResourcesToPods(`1[0-9]{3}_.*`)
 	if err != nil {
 		return nil, err
 	}
 	return pods, nil
 }
 
-func (cm *CloningManager) MapVirtualResourcesToPods(regex string) ([]Pod, error) {
+func (cs *CloningService) MapVirtualResourcesToPods(regex string) ([]Pod, error) {
 	// Get cluster resources
-	resources, err := cm.ProxmoxService.GetClusterResources("")
+	resources, err := cs.ProxmoxService.GetClusterResources("")
 	if err != nil {
 		return nil, err
 	}
@@ -75,8 +75,8 @@ func (cm *CloningManager) MapVirtualResourcesToPods(regex string) ([]Pod, error)
 	return pods, nil
 }
 
-func (cm *CloningManager) IsDeployed(templateName string) (bool, error) {
-	podPools, err := cm.GetAllPods()
+func (cs *CloningService) IsDeployed(templateName string) (bool, error) {
+	podPools, err := cs.AdminGetPods()
 	if err != nil {
 		return false, fmt.Errorf("failed to get pod pools: %w", err)
 	}

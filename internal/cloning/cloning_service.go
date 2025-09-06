@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cpp-cyber/proclone/internal/auth"
+	"github.com/cpp-cyber/proclone/internal/ldap"
 	"github.com/cpp-cyber/proclone/internal/proxmox"
 	"github.com/kelseyhightower/envconfig"
 )
@@ -21,7 +21,6 @@ func LoadCloningConfig() (*Config, error) {
 	return &config, nil
 }
 
-// NewTemplateClient creates a new template client
 func NewTemplateClient(db *sql.DB) *TemplateClient {
 	return &TemplateClient{
 		DB: db,
@@ -31,18 +30,15 @@ func NewTemplateClient(db *sql.DB) *TemplateClient {
 	}
 }
 
-// NewDatabaseService creates a new database service
 func NewDatabaseService(db *sql.DB) DatabaseService {
 	return NewTemplateClient(db)
 }
 
-// GetTemplateConfig returns the template configuration
 func (c *TemplateClient) GetTemplateConfig() *TemplateConfig {
 	return c.TemplateConfig
 }
 
-// NewTemplateClient creates a new template client
-func NewCloningManager(proxmoxService proxmox.Service, db *sql.DB, ldapService auth.Service) (*CloningManager, error) {
+func NewCloningService(proxmoxService proxmox.Service, db *sql.DB, ldapService ldap.Service) (*CloningService, error) {
 	config, err := LoadCloningConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load cloning configuration: %w", err)
@@ -52,7 +48,7 @@ func NewCloningManager(proxmoxService proxmox.Service, db *sql.DB, ldapService a
 		return nil, fmt.Errorf("incomplete cloning configuration")
 	}
 
-	return &CloningManager{
+	return &CloningService{
 		ProxmoxService:  proxmoxService,
 		DatabaseService: NewDatabaseService(db),
 		LDAPService:     ldapService,
@@ -60,12 +56,11 @@ func NewCloningManager(proxmoxService proxmox.Service, db *sql.DB, ldapService a
 	}, nil
 }
 
-// CloneTemplate clones a template pool for a user or group
-func (cm *CloningManager) CloneTemplate(template string, targetName string, isGroup bool) error {
+func (cs *CloningService) CloneTemplate(template string, targetName string, isGroup bool) error {
 	var errors []string
 
 	// 1. Get the template pool and its VMs
-	templatePool, err := cm.ProxmoxService.GetPoolVMs(template)
+	templatePool, err := cs.ProxmoxService.GetPoolVMs(template)
 	if err != nil {
 		return fmt.Errorf("failed to get template pool: %w", err)
 	}
@@ -76,7 +71,7 @@ func (cm *CloningManager) CloneTemplate(template string, targetName string, isGr
 	templateName := strings.TrimPrefix(template, "kamino_template_")
 
 	targetPoolName := fmt.Sprintf("%s_%s", templateName, targetName)
-	isDeployed, err := cm.IsDeployed(targetPoolName)
+	isDeployed, err := cs.IsDeployed(targetPoolName)
 	if err != nil {
 		return fmt.Errorf("failed to check if template is deployed: %w", err)
 	}
@@ -113,37 +108,36 @@ func (cm *CloningManager) CloneTemplate(template string, targetName string, isGr
 	}
 
 	// 5. Get the next available pod ID and create new pool
-	newPodID, newPodNumber, err := cm.ProxmoxService.GetNextPodID(cm.Config.MinPodID, cm.Config.MaxPodID)
+	newPodID, newPodNumber, err := cs.ProxmoxService.GetNextPodID(cs.Config.MinPodID, cs.Config.MaxPodID)
 	if err != nil {
 		return fmt.Errorf("failed to get next pod ID: %w", err)
 	}
 
 	newPoolName := fmt.Sprintf("%s_%s_%s", newPodID, templateName, targetName)
 
-	err = cm.ProxmoxService.CreateNewPool(newPoolName)
+	err = cs.ProxmoxService.CreateNewPool(newPoolName)
 	if err != nil {
 		return fmt.Errorf("failed to create new pool: %w", err)
 	}
 
 	// 6. Clone the router and all VMs
-
 	// If no router was found in the template, use the default router template
 	if router == nil {
 		router = &proxmox.VM{
-			Name: cm.Config.RouterName,
-			Node: cm.Config.RouterNode,
-			VMID: cm.Config.RouterVMID,
+			Name: cs.Config.RouterName,
+			Node: cs.Config.RouterNode,
+			VMID: cs.Config.RouterVMID,
 		}
 	}
 
-	newRouter, err := cm.ProxmoxService.CloneVM(*router, newPoolName)
+	newRouter, err := cs.ProxmoxService.CloneVM(*router, newPoolName)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("failed to clone router VM: %v", err))
 	}
 
 	// Clone each VM to new pool
 	for _, vm := range templateVMs {
-		_, err := cm.ProxmoxService.CloneVM(vm, newPoolName)
+		_, err := cs.ProxmoxService.CloneVM(vm, newPoolName)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to clone VM %s: %v", vm.Name, err))
 		}
@@ -152,29 +146,29 @@ func (cm *CloningManager) CloneTemplate(template string, targetName string, isGr
 	var vnetName = fmt.Sprintf("kamino%d", newPodNumber)
 
 	// 7. Configure VNet of all VMs
-	err = cm.SetPodVnet(newPoolName, vnetName)
+	err = cs.SetPodVnet(newPoolName, vnetName)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("failed to update pod vnet: %v", err))
 	}
 
 	// 8. Turn on Router
 	if newRouter != nil {
-		err = cm.ProxmoxService.WaitForDisk(newRouter.Node, newRouter.VMID, cm.Config.RouterWaitTimeout)
+		err = cs.ProxmoxService.WaitForDisk(newRouter.Node, newRouter.VMID, cs.Config.RouterWaitTimeout)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("router disk unavailable: %v", err))
 		}
 
-		err = cm.ProxmoxService.StartVM(newRouter.Node, newRouter.VMID)
+		err = cs.ProxmoxService.StartVM(newRouter.Node, newRouter.VMID)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to start router VM: %v", err))
 		}
 
 		// 9. Wait for router to be running
-		err = cm.ProxmoxService.WaitForRunning(*newRouter)
+		err = cs.ProxmoxService.WaitForRunning(*newRouter)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to start router VM: %v", err))
 		} else {
-			err = cm.configurePodRouter(newPodNumber, newRouter.Node, newRouter.VMID)
+			err = cs.configurePodRouter(newPodNumber, newRouter.Node, newRouter.VMID)
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("failed to configure pod router: %v", err))
 			}
@@ -182,13 +176,13 @@ func (cm *CloningManager) CloneTemplate(template string, targetName string, isGr
 	}
 
 	// 10. Set permissions on the pool to the user/group
-	err = cm.ProxmoxService.SetPoolPermission(newPoolName, targetName, isGroup)
+	err = cs.ProxmoxService.SetPoolPermission(newPoolName, targetName, isGroup)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("failed to update pool permissions for %s: %v", targetName, err))
 	}
 
 	// 11. Add a +1 to the total deployments in the templates database
-	err = cm.DatabaseService.AddDeployment(templateName)
+	err = cs.DatabaseService.AddDeployment(templateName)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("failed to increment template deployments for %s: %v", templateName, err))
 	}
@@ -197,12 +191,12 @@ func (cm *CloningManager) CloneTemplate(template string, targetName string, isGr
 	if len(errors) > 0 {
 
 		// Check if any VMs were successfully cloned
-		clonedVMs, checkErr := cm.ProxmoxService.GetPoolVMs(newPoolName)
+		clonedVMs, checkErr := cs.ProxmoxService.GetPoolVMs(newPoolName)
 		if checkErr != nil {
 		}
 
 		if len(clonedVMs) == 0 {
-			deleteErr := cm.ProxmoxService.DeletePool(newPoolName)
+			deleteErr := cs.ProxmoxService.DeletePool(newPoolName)
 			if deleteErr != nil {
 			}
 		}
@@ -213,17 +207,16 @@ func (cm *CloningManager) CloneTemplate(template string, targetName string, isGr
 	return nil
 }
 
-// DeletePod deletes a pod pool for a user or group
-func (cm *CloningManager) DeletePod(pod string) error {
+func (cs *CloningService) DeletePod(pod string) error {
 
 	// 1. Check if pool is already empty
-	isEmpty, err := cm.ProxmoxService.IsPoolEmpty(pod)
+	isEmpty, err := cs.ProxmoxService.IsPoolEmpty(pod)
 	if err != nil {
 		return fmt.Errorf("failed to check if pool %s is empty: %w", pod, err)
 	}
 
 	if isEmpty {
-		err := cm.ProxmoxService.DeletePool(pod)
+		err := cs.ProxmoxService.DeletePool(pod)
 		if err != nil {
 		} else {
 		}
@@ -231,7 +224,7 @@ func (cm *CloningManager) DeletePod(pod string) error {
 	}
 
 	// 2. Get all virtual machines in the pool
-	poolVMs, err := cm.ProxmoxService.GetPoolVMs(pod)
+	poolVMs, err := cs.ProxmoxService.GetPoolVMs(pod)
 	if err != nil {
 		return fmt.Errorf("failed to get pool VMs for %s: %w", pod, err)
 	}
@@ -244,7 +237,7 @@ func (cm *CloningManager) DeletePod(pod string) error {
 		if vm.Type == "qemu" {
 			// Only stop if VM is running
 			if vm.RunningStatus == "running" {
-				err := cm.ProxmoxService.StopVM(vm.NodeName, vm.VmId)
+				err := cs.ProxmoxService.StopVM(vm.NodeName, vm.VmId)
 				if err != nil {
 					return fmt.Errorf("failed to stop VM %s: %w", vm.Name, err)
 				}
@@ -263,7 +256,7 @@ func (cm *CloningManager) DeletePod(pod string) error {
 
 	// Wait for all previously running VMs to be stopped
 	for _, vm := range runningVMs {
-		err := cm.ProxmoxService.WaitForStopped(vm)
+		err := cs.ProxmoxService.WaitForStopped(vm)
 		if err != nil {
 			// Continue with deletion even if we can't confirm the VM is stopped
 		} else {
@@ -278,7 +271,7 @@ func (cm *CloningManager) DeletePod(pod string) error {
 
 	for _, vm := range poolVMs {
 		if vm.Type == "qemu" {
-			err := cm.ProxmoxService.DeleteVM(vm.NodeName, vm.VmId)
+			err := cs.ProxmoxService.DeleteVM(vm.NodeName, vm.VmId)
 			if err != nil {
 				return fmt.Errorf("failed to delete VM %s: %w", vm.Name, err)
 			}
@@ -287,14 +280,14 @@ func (cm *CloningManager) DeletePod(pod string) error {
 	}
 
 	// 5. Wait for all VMs to be deleted and pool to become empty
-	err = cm.ProxmoxService.WaitForPoolEmpty(pod, 5*time.Minute)
+	err = cs.ProxmoxService.WaitForPoolEmpty(pod, 5*time.Minute)
 	if err != nil {
 		// Continue with pool deletion even if we can't confirm all VMs are gone
 	} else {
 	}
 
 	// 6. Delete the pool
-	err = cm.ProxmoxService.DeletePool(pod)
+	err = cs.ProxmoxService.DeletePool(pod)
 	if err != nil {
 		return fmt.Errorf("failed to delete pool %s: %w", pod, err)
 	}
