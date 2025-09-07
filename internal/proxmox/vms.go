@@ -76,7 +76,7 @@ func (s *ProxmoxService) ConvertVMToTemplate(node string, vmID int) error {
 	return nil
 }
 
-func (s *ProxmoxService) CloneVM(sourceVM VM, newPoolName string) (*VM, error) {
+func (s *ProxmoxService) CloneVM(sourceVM VM, newPoolName string, useFullClone bool) (*VM, error) {
 	// Get next available VMID
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
@@ -99,12 +99,18 @@ func (s *ProxmoxService) CloneVM(sourceVM VM, newPoolName string) (*VM, error) {
 		return nil, fmt.Errorf("failed to find best node: %w", err)
 	}
 
+	// Determine clone type based on parameter
+	cloneType := 0 // Linked clone by default
+	if useFullClone {
+		cloneType = 1 // Full clone
+	}
+
 	// Clone VM
 	cloneBody := map[string]any{
 		"newid":  newVMID,
 		"name":   sourceVM.Name,
 		"pool":   newPoolName,
-		"full":   0, // Linked clone
+		"full":   cloneType, // Use configurable clone type
 		"target": bestNode,
 	}
 
@@ -180,7 +186,13 @@ func (s *ProxmoxService) WaitForDisk(node string, vmid int, maxWait time.Duratio
 		}
 
 		if configResp.HardDisk != "" {
-			return nil // Disk is available
+			// Additional check: try to get VM status to ensure disk is actually accessible
+			_, statusErr := s.getVMStatus(node, vmid)
+			if statusErr == nil {
+				// Wait a bit more for linked clone dependencies to be fully ready
+				time.Sleep(5 * time.Second)
+				return nil // Disk is available and VM is accessible
+			}
 		}
 	}
 

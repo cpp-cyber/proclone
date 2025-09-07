@@ -130,14 +130,14 @@ func (cs *CloningService) CloneTemplate(template string, targetName string, isGr
 		}
 	}
 
-	newRouter, err := cs.ProxmoxService.CloneVM(*router, newPoolName)
+	newRouter, err := cs.ProxmoxService.CloneVM(*router, newPoolName, true) // Always use full clone for routers
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("failed to clone router VM: %v", err))
 	}
 
 	// Clone each VM to new pool
 	for _, vm := range templateVMs {
-		_, err := cs.ProxmoxService.CloneVM(vm, newPoolName)
+		_, err := cs.ProxmoxService.CloneVM(vm, newPoolName, cs.Config.UseFullClones)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to clone VM %s: %v", vm.Name, err))
 		}

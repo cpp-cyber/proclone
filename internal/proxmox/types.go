@@ -42,7 +42,7 @@ type Service interface {
 	StopVM(node string, vmID int) error
 	DeleteVM(node string, vmID int) error
 	ConvertVMToTemplate(node string, vmID int) error
-	CloneVM(sourceVM VM, newPoolName string) (*VM, error)
+	CloneVM(sourceVM VM, newPoolName string, useFullClone bool) (*VM, error)
 	WaitForCloneCompletion(vm *VM, timeout time.Duration) error
 	WaitForDisk(node string, vmid int, maxWait time.Duration) error
 	WaitForRunning(vm VM) error
