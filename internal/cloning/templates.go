@@ -146,7 +146,10 @@ func (c *TemplateClient) GetTemplateInfo(templateName string) (KaminoTemplate, e
 		&template.CreatedAt,
 	)
 	if err != nil {
-		return KaminoTemplate{}, fmt.Errorf("failed to get template info: %w", err)
+		if strings.Contains(err.Error(), "no rows in result set") {
+			return KaminoTemplate{}, nil // No error, but template not found
+		}
+		return KaminoTemplate{}, fmt.Errorf("failed to scan row: %w", err)
 	}
 
 	return template, nil

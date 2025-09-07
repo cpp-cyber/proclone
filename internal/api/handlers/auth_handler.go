@@ -131,6 +131,7 @@ func (h *AuthHandler) RegisterHandler(c *gin.Context) {
 	var userDN = ""
 	userDN, err := h.ldapService.GetUserDN(req.Username)
 	if userDN != "" {
+		log.Printf("Attempt to register existing username: %s", req.Username)
 		c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
 		return
 	}
@@ -156,6 +157,7 @@ func (h *AuthHandler) RegisterHandler(c *gin.Context) {
 func (h *AuthHandler) GetUsersHandler(c *gin.Context) {
 	users, err := h.ldapService.GetUsers()
 	if err != nil {
+		log.Printf("Failed to retrieve users: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve users"})
 		return
 	}
@@ -196,12 +198,14 @@ func (h *AuthHandler) CreateUsersHandler(c *gin.Context) {
 	}
 
 	if len(errors) > 0 {
+		log.Printf("Failed to create users: %v", errors)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create users", "details": errors})
 		return
 	}
 
 	// Sync users to Proxmox
 	if err := h.proxmoxService.SyncUsers(); err != nil {
+		log.Printf("Failed to sync users with Proxmox: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync users with Proxmox", "details": err.Error()})
 		return
 	}
@@ -226,12 +230,14 @@ func (h *AuthHandler) DeleteUsersHandler(c *gin.Context) {
 	}
 
 	if len(errors) > 0 {
+		log.Printf("Failed to delete users: %v", errors)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete users", "details": errors})
 		return
 	}
 
 	// Sync users to Proxmox
 	if err := h.proxmoxService.SyncUsers(); err != nil {
+		log.Printf("Failed to sync users with Proxmox: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync users with Proxmox", "details": err.Error()})
 		return
 	}
@@ -255,6 +261,7 @@ func (h *AuthHandler) EnableUsersHandler(c *gin.Context) {
 	}
 
 	if len(errors) > 0 {
+		log.Printf("Failed to enable users: %v", errors)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to enable users", "details": errors})
 		return
 	}
@@ -278,6 +285,7 @@ func (h *AuthHandler) DisableUsersHandler(c *gin.Context) {
 	}
 
 	if len(errors) > 0 {
+		log.Printf("Failed to disable users: %v", errors)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to disable users", "details": errors})
 		return
 	}
@@ -297,6 +305,7 @@ func (h *AuthHandler) SetUserGroupsHandler(c *gin.Context) {
 	}
 
 	if err := h.ldapService.SetUserGroups(req.Username, req.Groups); err != nil {
+		log.Printf("Failed to set groups for user %s: %v", req.Username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set user groups", "details": err.Error()})
 		return
 	}
@@ -307,6 +316,7 @@ func (h *AuthHandler) SetUserGroupsHandler(c *gin.Context) {
 func (h *AuthHandler) GetGroupsHandler(c *gin.Context) {
 	groups, err := h.ldapService.GetGroups()
 	if err != nil {
+		log.Printf("Failed to retrieve groups: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve groups"})
 		return
 	}
@@ -334,12 +344,14 @@ func (h *AuthHandler) CreateGroupsHandler(c *gin.Context) {
 	}
 
 	if len(errors) > 0 {
+		log.Printf("Failed to create groups: %v", errors)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create groups", "details": errors})
 		return
 	}
 
 	// Sync groups to Proxmox
 	if err := h.proxmoxService.SyncGroups(); err != nil {
+		log.Printf("Failed to sync groups with Proxmox: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync groups with Proxmox", "details": err.Error()})
 		return
 	}
@@ -354,7 +366,8 @@ func (h *AuthHandler) RenameGroupHandler(c *gin.Context) {
 	}
 
 	if err := h.ldapService.RenameGroup(req.OldName, req.NewName); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to rename group"})
+		log.Printf("Failed to rename group %s to %s: %v", req.OldName, req.NewName, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to rename group", "details": err.Error()})
 		return
 	}
 
@@ -377,12 +390,14 @@ func (h *AuthHandler) DeleteGroupsHandler(c *gin.Context) {
 	}
 
 	if len(errors) > 0 {
+		log.Printf("Failed to delete groups: %v", errors)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete groups", "details": errors})
 		return
 	}
 
 	// Sync groups to Proxmox
 	if err := h.proxmoxService.SyncGroups(); err != nil {
+		log.Printf("Failed to sync groups with Proxmox: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync groups with Proxmox", "details": err.Error()})
 		return
 	}
@@ -397,7 +412,8 @@ func (h *AuthHandler) AddUsersHandler(c *gin.Context) {
 	}
 
 	if err := h.ldapService.AddUsersToGroup(req.Group, req.Usernames); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add users to group"})
+		log.Printf("Failed to add users to group %s: %v", req.Group, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add users to group", "details": err.Error()})
 		return
 	}
 
@@ -411,7 +427,8 @@ func (h *AuthHandler) RemoveUsersHandler(c *gin.Context) {
 	}
 
 	if err := h.ldapService.RemoveUsersFromGroup(req.Group, req.Usernames); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove users from group"})
+		log.Printf("Failed to remove users from group %s: %v", req.Group, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove users from group", "details": err.Error()})
 		return
 	}
 

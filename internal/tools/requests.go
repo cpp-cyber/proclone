@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 )
 
@@ -44,6 +45,7 @@ func (prh *ProxmoxRequestHelper) MakeRequest(req ProxmoxAPIRequest) (json.RawMes
 	if req.Method == "POST" || req.Method == "PUT" {
 		var bodyData any
 		if req.RequestBody != nil {
+			log.Printf("Request Body: %+v", req.RequestBody)
 			bodyData = req.RequestBody
 		} else {
 			bodyData = map[string]any{}

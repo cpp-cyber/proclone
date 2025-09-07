@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf16"
 
 	ldapv3 "github.com/go-ldap/ldap/v3"
@@ -16,15 +17,11 @@ import (
 // =================================================
 
 func (s *LDAPService) GetUsers() ([]User, error) {
+	kaminoUsersGroupDN := "CN=KaminoUsers,OU=KaminoGroups," + s.client.config.BaseDN
 	searchRequest := ldapv3.NewSearchRequest(
-		s.client.config.BaseDN,
-		ldapv3.ScopeWholeSubtree,
-		ldapv3.NeverDerefAliases,
-		0,
-		0,
-		false,
-		"(objectClass=inetOrgPerson)",
-		[]string{"uid", "createTimestamp", "userAccountControl", "memberOf", "cn"},
+		s.client.config.BaseDN, ldapv3.ScopeWholeSubtree, ldapv3.NeverDerefAliases, 0, 0, false,
+		fmt.Sprintf("(&(objectClass=user)(sAMAccountName=*)(memberOf=%s))", kaminoUsersGroupDN), // Filter for users in KaminoUsers group
+		[]string{"sAMAccountName", "dn", "whenCreated", "memberOf", "userAccountControl"},       // Attributes to retrieve
 		nil,
 	)
 
@@ -33,12 +30,18 @@ func (s *LDAPService) GetUsers() ([]User, error) {
 		return nil, fmt.Errorf("failed to search for users: %v", err)
 	}
 
-	var users []User
+	var users = []User{}
 	for _, entry := range searchResult.Entries {
 		user := User{
-			Name:      entry.GetAttributeValue("uid"),
-			CreatedAt: entry.GetAttributeValue("createTimestamp"),
-			Enabled:   true, // Default enabled, will be updated based on userAccountControl
+			Name: entry.GetAttributeValue("sAMAccountName"),
+		}
+
+		whenCreated := entry.GetAttributeValue("whenCreated")
+		if whenCreated != "" {
+			// AD stores dates in GeneralizedTime format: YYYYMMDDHHMMSS.0Z
+			if parsedTime, err := time.Parse("20060102150405.0Z", whenCreated); err == nil {
+				user.CreatedAt = parsedTime.Format("2006-01-02 15:04:05")
+			}
 		}
 
 		// Check if user is enabled
@@ -148,7 +151,30 @@ func (s *LDAPService) AddToGroup(userDN string, groupDN string) error {
 
 	err := s.client.Modify(modifyRequest)
 	if err != nil {
+		// Check if the error is because the user is already in the group
+		if strings.Contains(strings.ToLower(err.Error()), "already exists") ||
+			strings.Contains(strings.ToLower(err.Error()), "attribute or value exists") {
+			return nil // Not an error if user is already in group
+		}
 		return fmt.Errorf("failed to add user to group: %v", err)
+	}
+
+	return nil
+}
+
+func (s *LDAPService) RemoveFromGroup(userDN string, groupDN string) error {
+	modifyRequest := ldapv3.NewModifyRequest(groupDN, nil)
+	modifyRequest.Delete("member", []string{userDN})
+
+	err := s.client.Modify(modifyRequest)
+	if err != nil {
+		// Check if the error is because the user is not in the group
+		if strings.Contains(strings.ToLower(err.Error()), "no such attribute") ||
+			strings.Contains(strings.ToLower(err.Error()), "unwilling to perform") ||
+			strings.Contains(strings.ToLower(err.Error()), "no such object") {
+			return nil // Not an error if user is not in group
+		}
+		return fmt.Errorf("failed to remove user from group: %v", err)
 	}
 
 	return nil
@@ -185,6 +211,13 @@ func (s *LDAPService) CreateAndRegisterUser(userInfo UserRegistrationInfo) error
 		return fmt.Errorf("failed to enable user account: %v", err)
 	}
 
+	// Add user to KaminoUsers group
+	kaminoUsersGroupDN := "CN=KaminoUsers,OU=KaminoGroups," + s.client.config.BaseDN
+	err = s.AddToGroup(userDN, kaminoUsersGroupDN)
+	if err != nil {
+		return fmt.Errorf("failed to add user to KaminoUsers group: %v", err)
+	}
+
 	return nil
 }
 
@@ -194,7 +227,10 @@ func (s *LDAPService) AddUserToGroup(username string, groupName string) error {
 		return fmt.Errorf("failed to get user DN: %v", err)
 	}
 
-	groupDN := fmt.Sprintf("cn=%s,%s", groupName, s.client.config.BaseDN)
+	groupDN, err := s.getGroupDN(groupName)
+	if err != nil {
+		return fmt.Errorf("failed to get group DN: %v", err)
+	}
 
 	return s.AddToGroup(userDN, groupDN)
 }
@@ -205,7 +241,10 @@ func (s *LDAPService) RemoveUserFromGroup(username string, groupName string) err
 		return fmt.Errorf("failed to get user DN: %v", err)
 	}
 
-	groupDN := fmt.Sprintf("cn=%s,%s", groupName, s.client.config.BaseDN)
+	groupDN, err := s.getGroupDN(groupName)
+	if err != nil {
+		return fmt.Errorf("failed to get group DN: %v", err)
+	}
 
 	modifyRequest := ldapv3.NewModifyRequest(groupDN, nil)
 	modifyRequest.Delete("member", []string{userDN})

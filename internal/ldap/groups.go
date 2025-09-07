@@ -223,22 +223,16 @@ func (s *LDAPService) AddUsersToGroup(groupName string, usernames []string) erro
 		return fmt.Errorf("group not found: %v", err)
 	}
 
-	var userDNs []string
+	// Add users one by one to handle cases where some users might already be in the group
 	for _, username := range usernames {
 		userDN, err := s.GetUserDN(username)
 		if err != nil {
 			return fmt.Errorf("user %s not found: %v", username, err)
 		}
-		userDNs = append(userDNs, userDN)
-	}
 
-	// Add all users to the group
-	modifyReq := ldapv3.NewModifyRequest(groupDN, nil)
-	modifyReq.Add("member", userDNs)
-
-	err = s.client.Modify(modifyReq)
-	if err != nil {
-		return fmt.Errorf("failed to add users to group: %v", err)
+		if err := s.AddToGroup(userDN, groupDN); err != nil {
+			return fmt.Errorf("failed to add user %s to group: %v", username, err)
+		}
 	}
 
 	return nil
@@ -250,22 +244,16 @@ func (s *LDAPService) RemoveUsersFromGroup(groupName string, usernames []string)
 		return fmt.Errorf("group not found: %v", err)
 	}
 
-	var userDNs []string
+	// Remove users one by one to handle cases where some users might not be in the group
 	for _, username := range usernames {
 		userDN, err := s.GetUserDN(username)
 		if err != nil {
 			return fmt.Errorf("user %s not found: %v", username, err)
 		}
-		userDNs = append(userDNs, userDN)
-	}
 
-	// Remove all users from the group
-	modifyReq := ldapv3.NewModifyRequest(groupDN, nil)
-	modifyReq.Delete("member", userDNs)
-
-	err = s.client.Modify(modifyReq)
-	if err != nil {
-		return fmt.Errorf("failed to remove users from group: %v", err)
+		if err := s.RemoveFromGroup(userDN, groupDN); err != nil {
+			return fmt.Errorf("failed to remove user %s from group: %v", username, err)
+		}
 	}
 
 	return nil

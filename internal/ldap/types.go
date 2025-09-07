@@ -91,5 +91,5 @@ type User struct {
 
 type UserRegistrationInfo struct {
 	Username string `json:"username" validate:"required,min=1,max=20"`
-	Password string `json:"password" validate:"required,min=8"`
+	Password string `json:"password" validate:"required,min=8,max=128"`
 }

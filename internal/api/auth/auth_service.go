@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/cpp-cyber/proclone/internal/ldap"
-	ldapv3 "github.com/go-ldap/ldap/v3"
 )
 
 func NewAuthService() (*AuthService, error) {
@@ -20,33 +19,31 @@ func NewAuthService() (*AuthService, error) {
 }
 
 func (s *AuthService) Authenticate(username string, password string) (bool, error) {
-	// Get the LDAP service to perform authentication
-	ldapSvc, ok := s.ldapService.(*ldap.LDAPService)
-	if !ok {
-		return false, fmt.Errorf("invalid LDAP service type")
+	// Input validation
+	if username == "" || password == "" {
+		return false, nil // Invalid credentials, not an error
 	}
 
-	userDN, err := ldapSvc.GetUserDN(username)
+	// Get user DN first to validate user exists
+	userDN, err := s.ldapService.GetUserDN(username)
 	if err != nil {
-		return false, fmt.Errorf("failed to get user DN: %v", err)
+		return false, nil // User not found, not an error for security reasons
 	}
 
-	// Create a temporary client for authentication
+	// Create a temporary client for authentication to avoid privilege escalation
 	config, err := ldap.LoadConfig()
 	if err != nil {
-		return false, fmt.Errorf("failed to load LDAP config: %v", err)
+		return false, fmt.Errorf("failed to load LDAP config: %w", err)
 	}
 
 	authClient := ldap.NewClient(config)
-	err = authClient.Connect()
-	if err != nil {
-		return false, fmt.Errorf("failed to connect to LDAP: %v", err)
+	if err := authClient.Connect(); err != nil {
+		return false, fmt.Errorf("failed to connect to LDAP: %w", err)
 	}
 	defer authClient.Disconnect()
 
 	// Try to bind as the user to verify password
-	err = authClient.Bind(userDN, password)
-	if err != nil {
+	if err := authClient.SimpleBind(userDN, password); err != nil {
 		return false, nil // Invalid credentials, not an error
 	}
 
@@ -54,61 +51,36 @@ func (s *AuthService) Authenticate(username string, password string) (bool, erro
 }
 
 func (s *AuthService) IsAdmin(username string) (bool, error) {
+	// Input validation
+	if username == "" {
+		return false, fmt.Errorf("username cannot be empty")
+	}
+
+	// Get user DN
+	userDN, err := s.ldapService.GetUserDN(username)
+	if err != nil {
+		return false, fmt.Errorf("failed to get user DN: %w", err)
+	}
+
+	// Get user's groups
+	userGroups, err := s.ldapService.GetUserGroups(userDN)
+	if err != nil {
+		return false, fmt.Errorf("failed to get user groups: %w", err)
+	}
+
+	// Load LDAP config to get admin group DN
 	config, err := ldap.LoadConfig()
 	if err != nil {
-		return false, fmt.Errorf("failed to load LDAP config: %v", err)
+		return false, fmt.Errorf("failed to load LDAP config: %w", err)
 	}
 
-	// Create a client for admin check
-	client := ldap.NewClient(config)
-	err = client.Connect()
-	if err != nil {
-		return false, fmt.Errorf("failed to connect to LDAP: %v", err)
-	}
-	defer client.Disconnect()
-
-	// Search for admin group
-	adminGroupReq := ldapv3.NewSearchRequest(
-		config.AdminGroupDN,
-		ldapv3.ScopeWholeSubtree, ldapv3.NeverDerefAliases, 0, 0, false,
-		"(objectClass=group)",
-		[]string{"member"},
-		nil,
-	)
-
-	// Search for user DN
-	userDNReq := ldapv3.NewSearchRequest(
-		config.BaseDN,
-		ldapv3.ScopeWholeSubtree, ldapv3.NeverDerefAliases, 0, 0, false,
-		fmt.Sprintf("(&(objectClass=inetOrgPerson)(uid=%s))", ldapv3.EscapeFilter(username)),
-		[]string{"dn"},
-		nil,
-	)
-
-	adminGroupResult, err := client.Search(adminGroupReq)
-	if err != nil {
-		return false, fmt.Errorf("failed to search admin group: %v", err)
+	if config.AdminGroupDN == "" {
+		return false, fmt.Errorf("admin group DN not configured")
 	}
 
-	userResult, err := client.Search(userDNReq)
-	if err != nil {
-		return false, fmt.Errorf("failed to search user: %v", err)
-	}
-
-	if len(adminGroupResult.Entries) == 0 {
-		return false, fmt.Errorf("admin group not found")
-	}
-
-	if len(userResult.Entries) == 0 {
-		return false, fmt.Errorf("user not found")
-	}
-
-	adminMembers := adminGroupResult.Entries[0].GetAttributeValues("member")
-	userDN := userResult.Entries[0].DN
-
-	// Check if user DN is in admin group members
-	for _, member := range adminMembers {
-		if strings.EqualFold(member, userDN) {
+	// Check if user is in the admin group
+	for _, groupDN := range userGroups {
+		if strings.EqualFold(groupDN, "Proxmox-Admins") {
 			return true, nil
 		}
 	}
