@@ -5,10 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"net/url"
-	"strings"
 )
 
 // ProxmoxAPIRequest represents a request to the Proxmox API
@@ -16,7 +13,6 @@ type ProxmoxAPIRequest struct {
 	Method      string // GET, POST, PUT, DELETE
 	Endpoint    string // The API endpoint (e.g., "/nodes", "/nodes/node1/status")
 	RequestBody any    // Optional request body for POST/PUT requests
-	UseFormData bool   // Whether to send as form data instead of JSON
 }
 
 // ProxmoxAPIResponse represents the generic Proxmox API response structure
@@ -43,59 +39,21 @@ func NewProxmoxRequestHelper(baseURL, apiToken string, httpClient *http.Client) 
 // MakeRequest performs an HTTP request to the Proxmox API and returns the raw response data
 func (prh *ProxmoxRequestHelper) MakeRequest(req ProxmoxAPIRequest) (json.RawMessage, error) {
 	var reqBody io.Reader
-	var contentType string
 
 	// Prepare request body for POST/PUT requests
 	if req.Method == "POST" || req.Method == "PUT" {
 		var bodyData any
 		if req.RequestBody != nil {
-			log.Printf("Request Body: %+v", req.RequestBody)
 			bodyData = req.RequestBody
 		} else {
 			bodyData = map[string]any{}
 		}
 
-		if req.UseFormData {
-			// Convert to form data
-			formData := url.Values{}
-			if bodyMap, ok := bodyData.(map[string]any); ok {
-				for key, value := range bodyMap {
-					switch v := value.(type) {
-					case string:
-						formData.Set(key, v)
-					case []string:
-						// For arrays, Proxmox expects multiple form fields with same name
-						for _, item := range v {
-							formData.Add(key, item)
-						}
-					case []any:
-						// Handle generic interface slice (convert to strings)
-						for _, item := range v {
-							if str, ok := item.(string); ok {
-								formData.Add(key, str)
-							} else {
-								formData.Add(key, fmt.Sprintf("%v", item))
-							}
-						}
-					default:
-						// Convert to JSON string for complex types
-						jsonBytes, _ := json.Marshal(v)
-						formData.Set(key, string(jsonBytes))
-					}
-				}
-			}
-			reqBody = strings.NewReader(formData.Encode())
-			contentType = "application/x-www-form-urlencoded"
-			log.Printf("Form data: %s", formData.Encode())
-		} else {
-			// Send as JSON
-			jsonData, err := json.Marshal(bodyData)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal request body: %w", err)
-			}
-			reqBody = bytes.NewBuffer(jsonData)
-			contentType = "application/json"
+		jsonData, err := json.Marshal(bodyData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request body: %w", err)
 		}
+		reqBody = bytes.NewBuffer(jsonData)
 	}
 
 	// Create the full URL
@@ -109,9 +67,7 @@ func (prh *ProxmoxRequestHelper) MakeRequest(req ProxmoxAPIRequest) (json.RawMes
 
 	// Set headers
 	httpReq.Header.Add("Authorization", "PVEAPIToken="+prh.APIToken)
-	if req.Method == "POST" || req.Method == "PUT" {
-		httpReq.Header.Add("Content-Type", contentType)
-	}
+	httpReq.Header.Add("Content-Type", "application/json")
 
 	// Execute the request
 	resp, err := prh.HTTPClient.Do(httpReq)

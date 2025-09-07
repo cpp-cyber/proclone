@@ -19,8 +19,8 @@ type Config struct {
 	CloneTimeout      time.Duration `envconfig:"CLONE_TIMEOUT" default:"3m"`
 	RouterWaitTimeout time.Duration `envconfig:"ROUTER_WAIT_TIMEOUT" default:"120s"`
 	SDNApplyTimeout   time.Duration `envconfig:"SDN_APPLY_TIMEOUT" default:"30s"`
-	WANScriptPath     string        `envconfig:"WAN_SCRIPT_PATH" default:"/home/change-wan-ip.sh"`
-	VIPScriptPath     string        `envconfig:"VIP_SCRIPT_PATH" default:"/home/change-vip-subnet.sh"`
+	WANScriptPath     string        `envconfig:"WAN_SCRIPT_PATH" default:"/home/update-wan-ip.sh"`
+	VIPScriptPath     string        `envconfig:"VIP_SCRIPT_PATH" default:"/home/update-wan-vip.sh"`
 	WANIPBase         string        `envconfig:"WAN_IP_BASE" default:"172.16."`
 	UseFullClones     bool          `envconfig:"USE_FULL_CLONES" default:"false"`
 }

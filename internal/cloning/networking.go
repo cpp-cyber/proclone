@@ -2,7 +2,6 @@ package cloning
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"regexp"
 	"time"
@@ -33,12 +32,9 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 			break // Agent is responding
 		}
 
-		log.Printf("Agent ping failed for VMID %d: %s", vmid, err)
 		time.Sleep(backoff)
 		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
 	}
-
-	log.Printf("QEMU agent is responding for VMID %d, proceeding with configuration", vmid)
 
 	// Configure router WAN IP to have correct third octet using qemu agent API call
 	reqBody := map[string]any{
@@ -48,21 +44,16 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 		},
 	}
 
-	log.Printf("Request Body: %+v", reqBody)
-
 	execReq := tools.ProxmoxAPIRequest{
 		Method:      "POST",
 		Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/agent/exec", node, vmid),
 		RequestBody: reqBody,
-		UseFormData: true, // Use form data for QEMU agent requests
 	}
 
-	response, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(execReq)
+	_, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(execReq)
 	if err != nil {
 		return fmt.Errorf("failed to make IP change request: %v", err)
 	}
-
-	log.Printf("WAN IP configuration response: %s", string(response))
 
 	// Send agent exec request to change VIP subnet
 	vipReqBody := map[string]any{
@@ -76,16 +67,13 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 		Method:      "POST",
 		Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/agent/exec", node, vmid),
 		RequestBody: vipReqBody,
-		UseFormData: true, // Use form data for QEMU agent requests
 	}
 
-	vipResponse, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(vipExecReq)
+	_, err = cs.ProxmoxService.GetRequestHelper().MakeRequest(vipExecReq)
 	if err != nil {
 		return fmt.Errorf("failed to make VIP change request: %v", err)
 	}
 
-	log.Printf("VIP configuration response: %s", string(vipResponse))
-	log.Printf("Successfully configured router for pod %d on node %s, VMID %d", podNumber, node, vmid)
 	return nil
 }
 
