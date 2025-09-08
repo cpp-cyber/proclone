@@ -22,7 +22,6 @@ type Config struct {
 	WANScriptPath     string        `envconfig:"WAN_SCRIPT_PATH" default:"/home/update-wan-ip.sh"`
 	VIPScriptPath     string        `envconfig:"VIP_SCRIPT_PATH" default:"/home/update-wan-vip.sh"`
 	WANIPBase         string        `envconfig:"WAN_IP_BASE" default:"172.16."`
-	UseFullClones     bool          `envconfig:"USE_FULL_CLONES" default:"false"`
 }
 
 // KaminoTemplate represents a template in the system

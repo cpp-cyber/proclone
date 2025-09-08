@@ -2,6 +2,7 @@ package proxmox
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"strconv"
 	"strings"
@@ -76,7 +77,7 @@ func (s *ProxmoxService) ConvertVMToTemplate(node string, vmID int) error {
 	return nil
 }
 
-func (s *ProxmoxService) CloneVM(sourceVM VM, newPoolName string, useFullClone bool) (*VM, error) {
+func (s *ProxmoxService) CloneVM(sourceVM VM, newPoolName string) (*VM, error) {
 	// Get next available VMID
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
@@ -99,18 +100,12 @@ func (s *ProxmoxService) CloneVM(sourceVM VM, newPoolName string, useFullClone b
 		return nil, fmt.Errorf("failed to find best node: %w", err)
 	}
 
-	// Determine clone type based on parameter
-	cloneType := 0 // Linked clone by default
-	if useFullClone {
-		cloneType = 1 // Full clone
-	}
-
 	// Clone VM
 	cloneBody := map[string]any{
 		"newid":  newVMID,
 		"name":   sourceVM.Name,
 		"pool":   newPoolName,
-		"full":   cloneType, // Use configurable clone type
+		"full":   0, // Linked clone
 		"target": bestNode,
 	}
 
@@ -181,18 +176,14 @@ func (s *ProxmoxService) WaitForDisk(node string, vmid int, maxWait time.Duratio
 		time.Sleep(2 * time.Second)
 
 		configResp, err := s.getVMConfig(node, vmid)
+		log.Printf("Disk check for VM %d on node %s: %+v (err: %v)", vmid, node, configResp, err)
 		if err != nil {
 			continue
 		}
 
 		if configResp.HardDisk != "" {
-			// Additional check: try to get VM status to ensure disk is actually accessible
-			_, statusErr := s.getVMStatus(node, vmid)
-			if statusErr == nil {
-				// Wait a bit more for linked clone dependencies to be fully ready
-				time.Sleep(5 * time.Second)
-				return nil // Disk is available and VM is accessible
-			}
+			log.Printf("Disk for VM %d on node %s is available", vmid, node)
+			return nil // Disk is available
 		}
 	}
 

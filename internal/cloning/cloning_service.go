@@ -66,7 +66,6 @@ func (cs *CloningService) CloneTemplate(template string, targetName string, isGr
 	}
 
 	// 2. Check if the template has already been cloned by the user
-
 	// Extract template name from pool name (remove kamino_template_ prefix)
 	templateName := strings.TrimPrefix(template, "kamino_template_")
 
@@ -130,14 +129,14 @@ func (cs *CloningService) CloneTemplate(template string, targetName string, isGr
 		}
 	}
 
-	newRouter, err := cs.ProxmoxService.CloneVM(*router, newPoolName, true) // Always use full clone for routers
+	newRouter, err := cs.ProxmoxService.CloneVM(*router, newPoolName)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("failed to clone router VM: %v", err))
 	}
 
 	// Clone each VM to new pool
 	for _, vm := range templateVMs {
-		_, err := cs.ProxmoxService.CloneVM(vm, newPoolName, cs.Config.UseFullClones)
+		_, err := cs.ProxmoxService.CloneVM(vm, newPoolName)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to clone VM %s: %v", vm.Name, err))
 		}
