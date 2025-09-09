@@ -27,8 +27,9 @@ type Config struct {
 // KaminoTemplate represents a template in the system
 type KaminoTemplate struct {
 	Name            string `json:"name" binding:"required,min=1,max=100" validate:"alphanum,ascii"`
-	Description     string `json:"description" binding:"required,min=1,max=500"`
+	Description     string `json:"description" binding:"required,min=1,max=5000"`
 	ImagePath       string `json:"image_path" binding:"omitempty,max=255" validate:"omitempty,file"`
+	Authors         string `json:"authors" binding:"omitempty,max=255"`
 	TemplateVisible bool   `json:"template_visible"`
 	PodVisible      bool   `json:"pod_visible"`
 	VMsVisible      bool   `json:"vms_visible"`
@@ -48,7 +49,7 @@ type DatabaseService interface {
 	GetTemplateConfig() *TemplateConfig
 	GetTemplateInfo(templateName string) (KaminoTemplate, error)
 	AddDeployment(templateName string, num int) error
-	UpdateTemplate(template KaminoTemplate) error
+	EditTemplate(template KaminoTemplate) error
 	GetAllTemplateNames() ([]string, error)
 	DeleteImage(imagePath string) error
 }

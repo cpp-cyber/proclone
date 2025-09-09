@@ -36,6 +36,7 @@ func registerAdminRoutes(g *gin.RouterGroup, authHandler *handlers.AuthHandler, 
 	g.POST("/vm/reboot", proxmoxHandler.RebootVMHandler)
 	g.POST("/pods/delete", cloningHandler.AdminDeletePodHandler)
 	g.POST("/template/publish", cloningHandler.PublishTemplateHandler)
+	g.POST("/template/edit", cloningHandler.EditTemplateHandler)
 	g.POST("/template/delete", cloningHandler.DeleteTemplateHandler)
 	g.POST("/template/visibility", cloningHandler.ToggleTemplateVisibilityHandler)
 	g.POST("/template/image/upload", cloningHandler.UploadTemplateImageHandler)

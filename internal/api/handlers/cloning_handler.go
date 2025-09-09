@@ -338,6 +338,32 @@ func (ch *CloningHandler) PublishTemplateHandler(c *gin.Context) {
 	})
 }
 
+// ADMIN: EditTemplateHandler handles POST requests for editing a published template
+func (ch *CloningHandler) EditTemplateHandler(c *gin.Context) {
+	session := sessions.Default(c)
+	username := session.Get("id").(string)
+
+	var req PublishTemplateRequest
+	if !validateAndBind(c, &req) {
+		return
+	}
+
+	log.Printf("Admin %s requested editing of template %s", username, req.Template.Name)
+
+	if err := ch.Service.DatabaseService.EditTemplate(req.Template); err != nil {
+		log.Printf("Error editing template for admin %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to edit template",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Template edited successfully",
+	})
+}
+
 // ADMIN: DeleteTemplateHandler handles POST requests for deleting a template
 func (ch *CloningHandler) DeleteTemplateHandler(c *gin.Context) {
 	session := sessions.Default(c)

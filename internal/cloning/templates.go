@@ -100,8 +100,8 @@ func (c *TemplateClient) GetAllTemplateNames() ([]string, error) {
 }
 
 func (c *TemplateClient) InsertTemplate(template KaminoTemplate) error {
-	query := "INSERT INTO templates (name, description, image_path, template_visible, vm_count) VALUES (?, ?, ?, ?, ?)"
-	_, err := c.DB.Exec(query, template.Name, template.Description, template.ImagePath, template.TemplateVisible, template.VMCount)
+	query := "INSERT INTO templates (name, description, image_path, authors, template_visible, vm_count) VALUES (?, ?, ?, ?, ?, ?)"
+	_, err := c.DB.Exec(query, template.Name, template.Description, template.ImagePath, template.Authors, template.TemplateVisible, template.VMCount)
 	if err != nil {
 		return fmt.Errorf("failed to execute query: %w", err)
 	}
@@ -109,9 +109,37 @@ func (c *TemplateClient) InsertTemplate(template KaminoTemplate) error {
 	return nil
 }
 
-func (c *TemplateClient) UpdateTemplate(template KaminoTemplate) error {
-	query := "UPDATE templates SET description = ?, image_path = ?, template_visible = ?, vm_count = ? WHERE name = ?"
-	_, err := c.DB.Exec(query, template.Description, template.ImagePath, template.TemplateVisible, template.VMCount, template.Name)
+func (c *TemplateClient) EditTemplate(template KaminoTemplate) error {
+	setParts := []string{}
+	args := []any{}
+
+	// Always update description
+	setParts = append(setParts, "description = ?")
+	args = append(args, template.Description)
+
+	// Only update image_path if it's not empty
+	if template.ImagePath != "" {
+		setParts = append(setParts, "image_path = ?")
+		args = append(args, template.ImagePath)
+	}
+
+	// Always update authors
+	setParts = append(setParts, "authors = ?")
+	args = append(args, template.Authors)
+
+	// Always update vm_count
+	setParts = append(setParts, "vm_count = ?")
+	args = append(args, template.VMCount)
+
+	// Always update template_visible
+	setParts = append(setParts, "template_visible = ?")
+	args = append(args, template.TemplateVisible)
+
+	// Build and execute the query
+	query := fmt.Sprintf("UPDATE templates SET %s WHERE name = ?", strings.Join(setParts, ", "))
+	args = append(args, template.Name)
+
+	_, err := c.DB.Exec(query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to execute query: %w", err)
 	}
@@ -138,6 +166,7 @@ func (c *TemplateClient) GetTemplateInfo(templateName string) (KaminoTemplate, e
 		&template.Name,
 		&template.Description,
 		&template.ImagePath,
+		&template.Authors,
 		&template.TemplateVisible,
 		&template.PodVisible,
 		&template.VMsVisible,
@@ -298,6 +327,7 @@ func (c *TemplateClient) buildTemplates(rows *sql.Rows) ([]KaminoTemplate, error
 			&template.Name,
 			&template.Description,
 			&template.ImagePath,
+			&template.Authors,
 			&template.TemplateVisible,
 			&template.PodVisible,
 			&template.VMsVisible,
