@@ -1,9 +1,9 @@
-FROM golang:1.24 as builder
+FROM golang:1.24 AS builder
 
 WORKDIR /app
 COPY . .
 RUN go mod download
-RUN go build -o server .
+RUN go build -o server ./cmd/api
 
 FROM debian:bookworm-slim
 WORKDIR /app
