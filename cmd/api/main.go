@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/cpp-cyber/proclone/internal/api/handlers"
+	"github.com/cpp-cyber/proclone/internal/api/middleware"
 	"github.com/cpp-cyber/proclone/internal/api/routes"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
@@ -17,6 +18,7 @@ import (
 type Config struct {
 	Port          string `envconfig:"PORT" default:":8080"`
 	SessionSecret string `envconfig:"SESSION_SECRET" default:"default-secret-key"`
+	FrontendURL   string `envconfig:"FRONTEND_URL" default:"http://localhost:3000"`
 }
 
 // init the environment
@@ -41,6 +43,8 @@ func main() {
 	log.Printf("Starting server on port %s", config.Port)
 
 	r := gin.Default()
+	r.Use(middleware.CORSMiddleware(config.FrontendURL))
+	r.MaxMultipartMemory = 8 << 20 // 8MiB
 
 	// Setup session middleware
 	store := cookie.NewStore([]byte(config.SessionSecret))

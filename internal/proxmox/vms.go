@@ -134,6 +134,30 @@ func (s *ProxmoxService) CloneVM(sourceVM VM, newPoolName string) (*VM, error) {
 	return newVM, nil
 }
 
+func (s *ProxmoxService) CloneVMWithConfig(req VMCloneRequest) error {
+	// Clone VM
+	cloneBody := map[string]any{
+		"newid":  req.NewVMID,
+		"name":   req.SourceVM.Name,
+		"pool":   req.PoolName,
+		"full":   0, // Linked clone
+		"target": req.TargetNode,
+	}
+
+	cloneReq := tools.ProxmoxAPIRequest{
+		Method:      "POST",
+		Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/clone", req.SourceVM.Node, req.SourceVM.VMID),
+		RequestBody: cloneBody,
+	}
+
+	_, err := s.RequestHelper.MakeRequest(cloneReq)
+	if err != nil {
+		return fmt.Errorf("failed to initiate VM clone: %w", err)
+	}
+
+	return nil
+}
+
 func (s *ProxmoxService) WaitForCloneCompletion(vm *VM, timeout time.Duration) error {
 	start := time.Now()
 	backoff := time.Second
@@ -206,6 +230,30 @@ func (s *ProxmoxService) WaitForStopped(vm VM) error {
 
 func (s *ProxmoxService) WaitForRunning(vm VM) error {
 	return s.waitForStatus("running", vm)
+}
+
+func (s *ProxmoxService) GetNextVMIDs(num int) ([]int, error) {
+	// Get VMs
+	resources, err := s.GetClusterResources("type=vm")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cluster resources: %w", err)
+	}
+
+	// Iterate thought and find the highest VMID under 4000
+	highestID := 100
+	for _, res := range resources {
+		if res.VmId > highestID && res.VmId < 4000 {
+			highestID = res.VmId
+		}
+	}
+
+	// Generate the next num VMIDs
+	var vmIDs []int
+	for i := 1; i <= num; i++ {
+		vmIDs = append(vmIDs, highestID+i)
+	}
+
+	return vmIDs, nil
 }
 
 // =================================================

@@ -32,17 +32,18 @@ type Service interface {
 	SyncGroups() error
 
 	// Pod Management
-	GetNextPodID(minPodID int, maxPodID int) (string, int, error)
+	GetNextPodIDs(minPodID int, maxPodID int, num int) ([]string, []int, error)
 
 	// VM Management
 	GetVMs() ([]VirtualResource, error)
+	GetNextVMIDs(num int) ([]int, error)
 	StartVM(node string, vmID int) error
 	ShutdownVM(node string, vmID int) error
 	RebootVM(node string, vmID int) error
 	StopVM(node string, vmID int) error
 	DeleteVM(node string, vmID int) error
 	ConvertVMToTemplate(node string, vmID int) error
-	CloneVM(sourceVM VM, newPoolName string) (*VM, error)
+	CloneVMWithConfig(req VMCloneRequest) error
 	WaitForCloneCompletion(vm *VM, timeout time.Duration) error
 	WaitForDisk(node string, vmid int, maxWait time.Duration) error
 	WaitForRunning(vm VM) error
@@ -104,6 +105,14 @@ type VM struct {
 	Name string `json:"name,omitempty"`
 	Node string `json:"node"`
 	VMID int    `json:"vmid"`
+}
+
+type VMCloneRequest struct {
+	SourceVM   VM
+	PoolName   string
+	PodID      string
+	NewVMID    int
+	TargetNode string
 }
 
 type VirtualResource struct {

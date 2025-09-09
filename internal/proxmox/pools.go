@@ -202,3 +202,50 @@ func (s *ProxmoxService) GetNextPodID(minPodID int, maxPodID int) (string, int, 
 
 	return "", 0, fmt.Errorf("no available pod IDs in range 1000-1255")
 }
+
+func (s *ProxmoxService) GetNextPodIDs(minPodID int, maxPodID int, num int) ([]string, []int, error) {
+	// Get all existing pools
+	req := tools.ProxmoxAPIRequest{
+		Method:   "GET",
+		Endpoint: "/pools",
+	}
+
+	var poolsResponse []struct {
+		PoolID string `json:"poolid"`
+	}
+	if err := s.RequestHelper.MakeRequestAndUnmarshal(req, &poolsResponse); err != nil {
+		return nil, nil, fmt.Errorf("failed to get existing pools: %w", err)
+	}
+
+	// Extract pod IDs from existing pools
+	var usedIDs []int
+	for _, pool := range poolsResponse {
+		if len(pool.PoolID) >= 4 {
+			if id, err := strconv.Atoi(pool.PoolID[:4]); err == nil {
+				if id >= minPodID && id <= maxPodID {
+					usedIDs = append(usedIDs, id)
+				}
+			}
+		}
+	}
+
+	sort.Ints(usedIDs)
+
+	// Find available IDs
+	var podIDs []string
+	var adjustedIDs []int
+
+	for i := minPodID; i <= maxPodID && len(podIDs) < num; i++ {
+		found := slices.Contains(usedIDs, i)
+		if !found {
+			podIDs = append(podIDs, fmt.Sprintf("%04d", i))
+			adjustedIDs = append(adjustedIDs, i-1000)
+		}
+	}
+
+	if len(podIDs) < num {
+		return nil, nil, fmt.Errorf("only found %d available pod IDs out of %d requested in range %d-%d", len(podIDs), num, minPodID, maxPodID)
+	}
+
+	return podIDs, adjustedIDs, nil
+}

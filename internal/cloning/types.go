@@ -47,7 +47,7 @@ type DatabaseService interface {
 	UploadTemplateImage(c *gin.Context) (*UploadResult, error)
 	GetTemplateConfig() *TemplateConfig
 	GetTemplateInfo(templateName string) (KaminoTemplate, error)
-	AddDeployment(templateName string) error
+	AddDeployment(templateName string, num int) error
 	UpdateTemplate(template KaminoTemplate) error
 	GetAllTemplateNames() ([]string, error)
 	DeleteImage(imagePath string) error
@@ -96,4 +96,27 @@ type Pod struct {
 var allowedMIMEs = map[string]struct{}{
 	"image/jpeg": {},
 	"image/png":  {},
+}
+
+type CloneTarget struct {
+	Name      string
+	IsGroup   bool
+	Node      string
+	PoolName  string
+	PodID     string
+	PodNumber int
+	VMIDs     []int
+}
+
+type CloneRequest struct {
+	Template                 string
+	Targets                  []CloneTarget
+	CheckExistingDeployments bool // Whether to check if templates are already deployed
+}
+
+type RouterInfo struct {
+	TargetName string
+	PodNumber  int
+	Node       string
+	VMID       int
 }

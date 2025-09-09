@@ -60,10 +60,19 @@ func (ch *CloningHandler) CloneTemplateHandler(c *gin.Context) {
 
 	log.Printf("User %s requested cloning of template %s", username, req.Template)
 
-	// Construct the full template pool name
-	templatePoolName := "kamino_template_" + req.Template
+	// Create the cloning request using the new format
+	cloneReq := cloning.CloneRequest{
+		Template:                 req.Template,
+		CheckExistingDeployments: true, // Check for existing deployments for single user clones
+		Targets: []cloning.CloneTarget{
+			{
+				Name:    username,
+				IsGroup: false,
+			},
+		},
+	}
 
-	if err := ch.Service.CloneTemplate(templatePoolName, username, false); err != nil {
+	if err := ch.Service.CloneTemplate(cloneReq); err != nil {
 		log.Printf("Error cloning template: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to clone template",
@@ -88,32 +97,39 @@ func (ch *CloningHandler) AdminCloneTemplateHandler(c *gin.Context) {
 
 	log.Printf("%s requested bulk cloning of template %s", username, req.Template)
 
-	// Construct the full template pool name
-	templatePoolName := "kamino_template_" + req.Template
+	// Build targets slice from usernames and groups
+	var targets []cloning.CloneTarget
 
-	// Clone for users
-	var errors []error
-	for _, username := range req.Usernames {
-		err := ch.Service.CloneTemplate(templatePoolName, username, false)
-		if err != nil {
-			errors = append(errors, fmt.Errorf("failed to clone template for user %s: %v", username, err))
-		}
+	// Add users as targets
+	for _, user := range req.Usernames {
+		targets = append(targets, cloning.CloneTarget{
+			Name:    user,
+			IsGroup: false,
+		})
 	}
 
-	// Clone for groups
+	// Add groups as targets
 	for _, group := range req.Groups {
-		err := ch.Service.CloneTemplate(templatePoolName, group, true)
-		if err != nil {
-			errors = append(errors, fmt.Errorf("failed to clone template for group %s: %v", group, err))
-		}
+		targets = append(targets, cloning.CloneTarget{
+			Name:    group,
+			IsGroup: true,
+		})
 	}
 
-	// Check for errors
-	if len(errors) > 0 {
-		log.Printf("Admin %s encountered errors while cloning templates: %v", username, errors)
+	// Create clone request
+	cloneReq := cloning.CloneRequest{
+		Template:                 req.Template,
+		Targets:                  targets,
+		CheckExistingDeployments: false,
+	}
+
+	// Perform clone operation
+	err := ch.Service.CloneTemplate(cloneReq)
+	if err != nil {
+		log.Printf("Admin %s encountered error while bulk cloning template: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to clone templates",
-			"details": errors,
+			"details": err.Error(),
 		})
 		return
 	}

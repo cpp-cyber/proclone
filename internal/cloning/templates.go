@@ -119,9 +119,9 @@ func (c *TemplateClient) UpdateTemplate(template KaminoTemplate) error {
 	return nil
 }
 
-func (c *TemplateClient) AddDeployment(templateName string) error {
-	query := "UPDATE templates SET deployments = deployments + 1 WHERE name = ?"
-	_, err := c.DB.Exec(query, templateName)
+func (c *TemplateClient) AddDeployment(templateName string, num int) error {
+	query := "UPDATE templates SET deployments = deployments + ? WHERE name = ?"
+	_, err := c.DB.Exec(query, num, templateName)
 	if err != nil {
 		return fmt.Errorf("failed to execute query: %w", err)
 	}

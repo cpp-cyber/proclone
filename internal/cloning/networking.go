@@ -2,6 +2,7 @@ package cloning
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"regexp"
 	"time"
@@ -81,10 +82,17 @@ func (cs *CloningService) SetPodVnet(poolName string, vnetName string) error {
 	// Get all VMs in the pool
 	vms, err := cs.ProxmoxService.GetPoolVMs(poolName)
 	if err != nil {
-		return fmt.Errorf("failed to get pool VMs: %w", err)
+		return fmt.Errorf("failed to get pool VMs for pool %s: %w", poolName, err)
 	}
 
+	if len(vms) == 0 {
+		return fmt.Errorf("pool %s contains no VMs", poolName)
+	}
+
+	log.Printf("Setting VNet %s for %d VMs in pool %s", vnetName, len(vms), poolName)
+
 	routerRegex := regexp.MustCompile(`(?i).*(router|pfsense).*`)
+	var errors []string
 
 	for _, vm := range vms {
 		vnet := "net0"
@@ -92,6 +100,9 @@ func (cs *CloningService) SetPodVnet(poolName string, vnetName string) error {
 		// Detect if VM is a router based on its name (lazy way but requires fewer API calls)
 		if routerRegex.MatchString(vm.Name) {
 			vnet = "net1"
+			log.Printf("Detected router VM %s (VMID: %d), using %s interface", vm.Name, vm.VmId, vnet)
+		} else {
+			log.Printf("Setting VNet for VM %s (VMID: %d), using %s interface", vm.Name, vm.VmId, vnet)
 		}
 
 		// Update VM network configuration
@@ -107,9 +118,18 @@ func (cs *CloningService) SetPodVnet(poolName string, vnetName string) error {
 
 		_, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(req)
 		if err != nil {
-			return fmt.Errorf("failed to update network for VM %d: %w", vm.VmId, err)
+			errorMsg := fmt.Sprintf("failed to update network for VM %s (VMID: %d): %v", vm.Name, vm.VmId, err)
+			log.Printf("ERROR: %s", errorMsg)
+			errors = append(errors, errorMsg)
+		} else {
+			log.Printf("Successfully updated VNet for VM %s (VMID: %d) to %s", vm.Name, vm.VmId, vnetName)
 		}
 	}
 
+	if len(errors) > 0 {
+		return fmt.Errorf("VNet configuration completed with errors: %v", errors)
+	}
+
+	log.Printf("Successfully configured VNet %s for all %d VMs in pool %s", vnetName, len(vms), poolName)
 	return nil
 }
