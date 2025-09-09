@@ -31,8 +31,7 @@ func init() {
 }
 
 func main() {
-	// TODO: Set gin mode based on environment (development/production)
-	// gin.SetMode(gin.ReleaseMode)
+	gin.SetMode(gin.ReleaseMode)
 
 	// Load and parse configuration from environment variables
 	var config Config
@@ -45,6 +44,7 @@ func main() {
 	r := gin.Default()
 	r.Use(middleware.CORSMiddleware(config.FrontendURL))
 	r.MaxMultipartMemory = 8 << 20 // 8MiB
+	r.SetTrustedProxies(nil)
 
 	// Setup session middleware
 	store := cookie.NewStore([]byte(config.SessionSecret))
