@@ -207,17 +207,28 @@ func (s *ProxmoxService) WaitForDisk(node string, vmid int, maxWait time.Duratio
 		if configResp.HardDisk != "" {
 			pendingReq := tools.ProxmoxAPIRequest{
 				Method:   "GET",
-				Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/pending", node, vmid),
+				Endpoint: fmt.Sprintf("/nodes/%s/storage/%s/content?vmid=%d", node, s.Config.StorageID, vmid),
 			}
 
-			pendingResponse, err := s.RequestHelper.MakeRequest(pendingReq)
-			log.Printf("Pending response for VMID %d on node %s: %s", vmid, node, string(pendingResponse))
-			if err != nil && strings.Contains(err.Error(), "does not exist") {
-				log.Printf("Disk for VMID %d on node %s not ready yet: %v", vmid, node, err)
-				continue // Disk not synced yet
+			var diskResponse []PendingDiskResponse
+			err := s.RequestHelper.MakeRequestAndUnmarshal(pendingReq, &diskResponse)
+			if err != nil || len(diskResponse) == 0 {
+				log.Printf("Error retrieving pending disk info for VMID %d on node %s: %v", vmid, node, err)
+				continue
 			}
 
-			return nil // Disk is available
+			// Iterate through all disks, if all have valid Used and Size (not 0) consider available
+			allAvailable := true
+			for _, disk := range diskResponse {
+				if disk.Used == 0 || disk.Size == 0 {
+					allAvailable = false
+					break
+				}
+			}
+
+			if allAvailable {
+				return nil // Disk is available
+			}
 		}
 	}
 

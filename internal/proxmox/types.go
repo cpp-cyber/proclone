@@ -17,6 +17,7 @@ type ProxmoxConfig struct {
 	CriticalPool string   `envconfig:"PROXMOX_CRITICAL_POOL"`
 	Realm        string   `envconfig:"REALM"`
 	NodesStr     string   `envconfig:"PROXMOX_NODES"`
+	StorageID    string   `envconfig:"STORAGE_ID" default:"local-lvm"`
 	Nodes        []string // Parsed from NodesStr
 	APIToken     string   // Computed from TokenID and TokenSecret
 }
@@ -151,4 +152,9 @@ type ClusterResourceUsageResponse struct {
 	Total  ResourceUsage       `json:"total"`
 	Nodes  []NodeResourceUsage `json:"nodes"`
 	Errors []string            `json:"errors,omitempty"`
+}
+
+type PendingDiskResponse struct {
+	Used int64 `json:"used"`
+	Size int64 `json:"size"`
 }
