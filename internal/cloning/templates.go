@@ -264,6 +264,10 @@ func (cs *CloningService) PublishTemplate(template KaminoTemplate) error {
 		}
 
 		for _, snapshot := range snapshots {
+			if snapshot.Name == "current" {
+				continue // Skip the "current" snapshot as it cannot be deleted
+			}
+
 			if err := cs.ProxmoxService.DeleteVMSnapshot(vm.NodeName, vm.VmId, snapshot.Name); err != nil {
 				// Break out of snapshot loop on error and leave it to full clone
 				log.Printf("Error deleting snapshot %s for VM %d: %v", snapshot.Name, vm.VmId, err)
