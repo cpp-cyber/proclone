@@ -6,8 +6,9 @@ import (
 )
 
 // registerPrivateRoutes defines all routes accessible to authenticated users
-func registerPrivateRoutes(g *gin.RouterGroup, authHandler *handlers.AuthHandler, proxmoxHandler *handlers.ProxmoxHandler, cloningHandler *handlers.CloningHandler) {
+func registerPrivateRoutes(g *gin.RouterGroup, authHandler *handlers.AuthHandler, cloningHandler *handlers.CloningHandler, dashboardHandler *handlers.DashboardHandler) {
 	// GET Requests
+	g.GET("/dashboard", dashboardHandler.GetUserDashboardStatsHandler)
 	g.GET("/session", authHandler.SessionHandler)
 	g.GET("/pods", cloningHandler.GetPodsHandler)
 	g.GET("/templates", cloningHandler.GetTemplatesHandler)

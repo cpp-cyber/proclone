@@ -60,6 +60,34 @@ func (ch *CloningHandler) CloneTemplateHandler(c *gin.Context) {
 
 	log.Printf("User %s requested cloning of template %s", username, req.Template)
 
+	publishedTemplates, err := ch.Service.DatabaseService.GetPublishedTemplates()
+	if err != nil {
+		log.Printf("Error fetching published templates: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to fetch published templates",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Check if the requested template is in the list of published templates
+	templateFound := false
+	for _, tmpl := range publishedTemplates {
+		if tmpl.Name == req.Template {
+			templateFound = true
+			break
+		}
+	}
+
+	if !templateFound {
+		log.Printf("Template %s not found or not published", req.Template)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Template not found or not published",
+			"details": fmt.Sprintf("Template %s is not available for cloning", req.Template),
+		})
+		return
+	}
+
 	// Create the cloning request using the new format
 	cloneReq := cloning.CloneRequest{
 		Template:                 req.Template,

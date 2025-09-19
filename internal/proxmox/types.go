@@ -43,12 +43,13 @@ type Service interface {
 	RebootVM(node string, vmID int) error
 	StopVM(node string, vmID int) error
 	DeleteVM(node string, vmID int) error
+	GetVMSnapshots(node string, vmID int) ([]VMSnapshot, error)
+	DeleteVMSnapshot(node string, vmID int, snapshotName string) error
 	ConvertVMToTemplate(node string, vmID int) error
-	CloneVMWithConfig(req VMCloneRequest) error
-	WaitForCloneCompletion(vm *VM, timeout time.Duration) error
-	WaitForDisk(node string, vmid int, maxWait time.Duration) error
-	WaitForRunning(vm VM) error
-	WaitForStopped(vm VM) error
+	CloneVM(req VMCloneRequest) error
+	WaitForDisk(node string, vmID int, maxWait time.Duration) error
+	WaitForRunning(node string, vmiID int) error
+	WaitForStopped(node string, vmiID int) error
 
 	// Pool Management
 	GetPoolVMs(poolName string) ([]VirtualResource, error)
@@ -113,7 +114,12 @@ type VMCloneRequest struct {
 	PoolName   string
 	PodID      string
 	NewVMID    int
+	Full       int
 	TargetNode string
+}
+
+type VMSnapshot struct {
+	Name string `json:"name"`
 }
 
 type VirtualResource struct {

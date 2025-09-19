@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/cpp-cyber/proclone/internal/proxmox"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -217,25 +218,76 @@ func (cs *CloningService) GetUnpublishedTemplates() ([]string, error) {
 	return unpublished, nil
 }
 
+// Before publishing we try to convert as many VMs to templates to speed up cloning process
 func (cs *CloningService) PublishTemplate(template KaminoTemplate) error {
-	// Insert template information into database
-	if err := cs.DatabaseService.InsertTemplate(template); err != nil {
-		return fmt.Errorf("failed to publish template: %w", err)
-	}
-
-	// Get all VMs in pool
+	// 1. Get all VMs in pool
+	// If this fails, the function will error out
 	vms, err := cs.ProxmoxService.GetPoolVMs("kamino_template_" + template.Name)
 	if err != nil {
 		log.Printf("Error retrieving VMs in pool: %v", err)
 		return fmt.Errorf("failed to get VMs in pool: %w", err)
 	}
 
-	// Convert all VMs to templates
+	// 2. Shutdown all running VMs in pool
+	// If a VM cannot be shutdown, this function will error out
+	runningVMs := []proxmox.VirtualResource{}
+	for _, vm := range vms {
+		if vm.RunningStatus != "stopped" {
+			runningVMs = append(runningVMs, vm)
+			if err := cs.ProxmoxService.ShutdownVM(vm.NodeName, vm.VmId); err != nil {
+				log.Printf("Error shutting down VM %d: %v", vm.VmId, err)
+				return fmt.Errorf("failed to shutdown VM %d: %w", vm.VmId, err)
+			}
+		}
+	}
+
+	// 3. Wait for running VMs to be stopped
+	// If a VM cannot be verified as stopped, this function will error out
+	for _, vm := range runningVMs {
+		if err := cs.ProxmoxService.WaitForStopped(vm.NodeName, vm.VmId); err != nil {
+			log.Printf("Error waiting for VM %d to stop: %v", vm.VmId, err)
+			return fmt.Errorf("failed to confirm VM %d is stopped: %w", vm.VmId, err)
+		}
+	}
+
+	// 4. Detect if any VMs have snapshots and remove them
+	// If a snapshot cannot be removed, it will skip the VM since and automatically fall back to full clone
+	for _, vm := range vms {
+		snapshots, err := cs.ProxmoxService.GetVMSnapshots(vm.NodeName, vm.VmId)
+		if err != nil {
+			log.Printf("Error getting snapshots for VM %d: %v", vm.VmId, err)
+			continue
+		}
+
+		if snapshots == nil {
+			continue // No snapshots to delete
+		}
+
+		for _, snapshot := range snapshots {
+			if err := cs.ProxmoxService.DeleteVMSnapshot(vm.NodeName, vm.VmId, snapshot.Name); err != nil {
+				// Break out of snapshot loop on error and leave it to full clone
+				log.Printf("Error deleting snapshot %s for VM %d: %v", snapshot.Name, vm.VmId, err)
+				break
+			}
+		}
+	}
+
+	// 5. Attempt to convert all VMs to templates
+	// If a VM cannot be converted, it will skip the VM since it will automatically
+	// full clone if not a template or it is already a template
 	for _, vm := range vms {
 		if err := cs.ProxmoxService.ConvertVMToTemplate(vm.NodeName, vm.VmId); err != nil {
+			// Skip VM since it will automatically full clone if not a template or it is already a template
 			log.Printf("Error converting VM %d to template: %v", vm.VmId, err)
-			return fmt.Errorf("failed to convert VM to template: %w", err)
+			continue
 		}
+	}
+
+	// 6. Insert template information into database
+	// If this fails, the function will error out
+	if err := cs.DatabaseService.InsertTemplate(template); err != nil {
+		log.Printf("Error inserting template into database: %v", err)
+		return fmt.Errorf("failed to publish to database: %w", err)
 	}
 
 	return nil

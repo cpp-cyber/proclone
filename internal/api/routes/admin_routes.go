@@ -6,12 +6,9 @@ import (
 )
 
 // registerAdminRoutes defines all routes accessible to admin users
-func registerAdminRoutes(g *gin.RouterGroup, authHandler *handlers.AuthHandler, proxmoxHandler *handlers.ProxmoxHandler, cloningHandler *handlers.CloningHandler) {
-	// Create dashboard handler
-	dashboardHandler := handlers.NewDashboardHandler(authHandler, proxmoxHandler, cloningHandler)
-
+func registerAdminRoutes(g *gin.RouterGroup, authHandler *handlers.AuthHandler, proxmoxHandler *handlers.ProxmoxHandler, cloningHandler *handlers.CloningHandler, dashboardHandler *handlers.DashboardHandler) {
 	// GET Requests
-	g.GET("/dashboard", dashboardHandler.GetDashboardStatsHandler)
+	g.GET("/dashboard", dashboardHandler.GetAdminDashboardStatsHandler)
 	g.GET("/cluster", proxmoxHandler.GetClusterResourceUsageHandler)
 	g.GET("/users", authHandler.GetUsersHandler)
 	g.GET("/groups", authHandler.GetGroupsHandler)
