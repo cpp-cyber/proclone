@@ -76,18 +76,28 @@ func (cs *CloningService) MapVirtualResourcesToPods(regex string) ([]Pod, error)
 	return pods, nil
 }
 
-func (cs *CloningService) IsDeployed(templateName string) (bool, error) {
+func (cs *CloningService) ValidateCloneRequest(templateName string, username string) (bool, error) {
 	podPools, err := cs.AdminGetPods()
 	if err != nil {
-		return false, fmt.Errorf("failed to get pod pools: %w", err)
+		return false, fmt.Errorf("failed to get deployed pods: %w", err)
 	}
+
+	var alreadyDeployed = false
+	var numDeployments = 0
 
 	for _, pod := range podPools {
 		// Remove the Pod ID number and _ to compare
-		if pod.Name[5:] == templateName {
-			return true, nil
+		if !alreadyDeployed && pod.Name[5:] == templateName {
+			alreadyDeployed = true
+		}
+
+		if strings.Contains(pod.Name, username) {
+			numDeployments++
 		}
 	}
 
-	return false, nil
+	// Valid if not already deployed and user has less than 5 deployments
+	var isValidCloneRequest = !alreadyDeployed && numDeployments < 5
+
+	return isValidCloneRequest, nil
 }

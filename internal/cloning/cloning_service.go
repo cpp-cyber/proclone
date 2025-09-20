@@ -72,12 +72,12 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	if req.CheckExistingDeployments {
 		for _, target := range req.Targets {
 			targetPoolName := fmt.Sprintf("%s_%s", req.Template, target.Name)
-			isDeployed, err := cs.IsDeployed(targetPoolName)
+			isValid, err := cs.ValidateCloneRequest(targetPoolName, target.Name)
 			if err != nil {
-				return fmt.Errorf("failed to check if template is deployed for %s: %w", target.Name, err)
+				return fmt.Errorf("failed to validate the deployment of template for %s: %w", target.Name, err)
 			}
-			if isDeployed {
-				return fmt.Errorf("template %s is already or in the process of being deployed for %s", req.Template, target.Name)
+			if !isValid {
+				return fmt.Errorf("template %s is already deployed for %s or they have exceeded the maximum of 5 deployed pods", req.Template, target.Name)
 			}
 		}
 	}
