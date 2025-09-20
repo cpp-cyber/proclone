@@ -48,8 +48,9 @@ type Service interface {
 	ConvertVMToTemplate(node string, vmID int) error
 	CloneVM(req VMCloneRequest) error
 	WaitForDisk(node string, vmID int, maxWait time.Duration) error
-	WaitForRunning(node string, vmiID int) error
-	WaitForStopped(node string, vmiID int) error
+	WaitForLock(node string, vmID int) error
+	WaitForRunning(node string, vmID int) error
+	WaitForStopped(node string, vmID int) error
 
 	// Pool Management
 	GetPoolVMs(poolName string) ([]VirtualResource, error)
@@ -90,7 +91,7 @@ type ProxmoxNodeStatus struct {
 
 type VirtualResourceConfig struct {
 	HardDisk string `json:"scsi0"`
-	Lock     string `json:"lock,omitempty"`
+	Lock     string `json:"lock"`
 	Net0     string `json:"net0"`
 	Net1     string `json:"net1,omitempty"`
 }

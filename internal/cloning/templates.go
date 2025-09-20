@@ -280,8 +280,14 @@ func (cs *CloningService) PublishTemplate(template KaminoTemplate) error {
 	// If a VM cannot be converted, it will skip the VM since it will automatically
 	// full clone if not a template or it is already a template
 	for _, vm := range vms {
+		// Wait for any locks to clear before converting
+		if err := cs.ProxmoxService.WaitForLock(vm.NodeName, vm.VmId); err != nil {
+			log.Printf("Error waiting for lock to clear on VM %d: %v", vm.VmId, err)
+			continue
+		}
+
+		// Attempt to convert to template
 		if err := cs.ProxmoxService.ConvertVMToTemplate(vm.NodeName, vm.VmId); err != nil {
-			// Skip VM since it will automatically full clone if not a template or it is already a template
 			log.Printf("Error converting VM %d to template: %v", vm.VmId, err)
 			continue
 		}

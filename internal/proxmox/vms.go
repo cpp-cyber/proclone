@@ -201,6 +201,29 @@ func (s *ProxmoxService) GetNextVMIDs(num int) ([]int, error) {
 	return vmIDs, nil
 }
 
+func (s *ProxmoxService) WaitForLock(node string, vmID int) error {
+	timeout := 1 * time.Minute
+	start := time.Now()
+
+	for time.Since(start) < timeout {
+		config, err := s.getVMConfig(node, vmID)
+		if err != nil {
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		log.Printf("VM %d lock status: '%s'", vmID, config.Lock)
+
+		if config.Lock == "" {
+			return nil // No lock
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+
+	return fmt.Errorf("timeout waiting for VM lock to be cleared")
+}
+
 // =================================================
 // Private Functions
 // =================================================
