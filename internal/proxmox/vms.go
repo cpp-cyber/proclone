@@ -196,7 +196,7 @@ func (s *ProxmoxService) GetNextVMIDs(num int) ([]int, error) {
 	lowestID := usedVMIDs[len(usedVMIDs)-1] // Set to highest existing VMID by default
 	prevID := usedVMIDs[0]                  // Start at the lowest existing VMID
 	for _, vmID := range usedVMIDs[1 : len(usedVMIDs)-1] {
-		if (vmID - prevID) >= num {
+		if (vmID - prevID) > num {
 			log.Printf("Found available VMID range between %d and %d", prevID, vmID)
 			lowestID = prevID
 			break
