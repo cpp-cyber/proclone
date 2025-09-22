@@ -2,6 +2,7 @@ package cloning
 
 import (
 	"database/sql"
+	"sync"
 	"time"
 
 	"github.com/cpp-cyber/proclone/internal/ldap"
@@ -80,6 +81,7 @@ type CloningService struct {
 	DatabaseService DatabaseService
 	LDAPService     ldap.Service
 	Config          *Config
+	vmidMutex       sync.Mutex // Protects resource allocation operations (Pod IDs and VM IDs)
 }
 
 // PodResponse represents the response structure for pod operations
@@ -113,6 +115,7 @@ type CloneRequest struct {
 	Template                 string
 	Targets                  []CloneTarget
 	CheckExistingDeployments bool // Whether to check if templates are already deployed
+	StartingVMID             int  // Optional starting VMID for admin clones
 }
 
 type RouterInfo struct {

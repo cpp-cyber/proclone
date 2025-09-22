@@ -149,6 +149,7 @@ func (ch *CloningHandler) AdminCloneTemplateHandler(c *gin.Context) {
 		Template:                 req.Template,
 		Targets:                  targets,
 		CheckExistingDeployments: false,
+		StartingVMID:             req.StartingVMID,
 	}
 
 	// Perform clone operation

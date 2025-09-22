@@ -127,9 +127,22 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		return fmt.Errorf("failed to get next pod IDs: %w", err)
 	}
 
-	vmIDs, err := cs.ProxmoxService.GetNextVMIDs(len(req.Targets) * numVMsPerTarget)
-	if err != nil {
-		return fmt.Errorf("failed to get next VM IDs: %w", err)
+	// Lock the vmid allocation mutex to prevent race conditions during vmid allocation
+	cs.vmidMutex.Lock()
+
+	// Use StartingVMID from request if provided, otherwise get next available VMIDs
+	var vmIDs []int
+	numVMs := len(req.Targets) * numVMsPerTarget
+	if req.StartingVMID != 0 {
+		log.Printf("Starting VMID allocation from specified starting VMID: %d", req.StartingVMID)
+		for i := range numVMs {
+			vmIDs = append(vmIDs, req.StartingVMID+i)
+		}
+	} else {
+		vmIDs, err = cs.ProxmoxService.GetNextVMIDs(numVMs)
+		if err != nil {
+			return fmt.Errorf("failed to get next VM IDs: %w", err)
+		}
 	}
 
 	for i := range req.Targets {
@@ -222,6 +235,9 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 			time.Sleep(2 * time.Second)
 		}
 	}
+
+	// Release the vmid allocation mutex now that all of the VMs are cloned on proxmox
+	cs.vmidMutex.Unlock()
 
 	// 9. Configure VNet of all VMs
 	log.Printf("Configuring VNets for %d targets", len(req.Targets))

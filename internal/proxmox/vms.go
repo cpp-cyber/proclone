@@ -184,18 +184,22 @@ func (s *ProxmoxService) GetNextVMIDs(num int) ([]int, error) {
 		return nil, fmt.Errorf("failed to get cluster resources: %w", err)
 	}
 
-	// Iterate thought and find the highest VMID under 4000
-	highestID := 100
-	for _, res := range resources {
-		if res.VmId > highestID && res.VmId < 4000 {
-			highestID = res.VmId
+	// Iterate through and find the lowest available VMID range that has enough space based on num
+	lowestID := resources[len(resources)-1].VmId // Set to highest existing VMID by default
+	prevID := resources[0].VmId                  // Start at the lowest existing VMID
+	for _, vm := range resources[1 : len(resources)-1] {
+		if (vm.VmId - prevID) >= num {
+			log.Printf("Found available VMID range between %d and %d", prevID, vm.VmId)
+			lowestID = prevID
+			break
 		}
+		prevID = vm.VmId
 	}
 
 	// Generate the next num VMIDs
 	var vmIDs []int
 	for i := 1; i <= num; i++ {
-		vmIDs = append(vmIDs, highestID+i)
+		vmIDs = append(vmIDs, lowestID+i)
 	}
 
 	return vmIDs, nil
