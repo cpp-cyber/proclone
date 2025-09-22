@@ -3,6 +3,7 @@ package proxmox
 import (
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
 
@@ -184,16 +185,23 @@ func (s *ProxmoxService) GetNextVMIDs(num int) ([]int, error) {
 		return nil, fmt.Errorf("failed to get cluster resources: %w", err)
 	}
 
+	var usedVMIDs []int
+	for _, vm := range resources {
+		usedVMIDs = append(usedVMIDs, vm.VmId)
+	}
+	// Sort VMIDs from lowest to highest
+	slices.Sort(usedVMIDs)
+
 	// Iterate through and find the lowest available VMID range that has enough space based on num
-	lowestID := resources[len(resources)-1].VmId // Set to highest existing VMID by default
-	prevID := resources[0].VmId                  // Start at the lowest existing VMID
-	for _, vm := range resources[1 : len(resources)-1] {
-		if (vm.VmId - prevID) >= num {
-			log.Printf("Found available VMID range between %d and %d", prevID, vm.VmId)
+	lowestID := usedVMIDs[len(usedVMIDs)-1] // Set to highest existing VMID by default
+	prevID := usedVMIDs[0]                  // Start at the lowest existing VMID
+	for _, vmID := range usedVMIDs[1 : len(usedVMIDs)-1] {
+		if (vmID - prevID) >= num {
+			log.Printf("Found available VMID range between %d and %d", prevID, vmID)
 			lowestID = prevID
 			break
 		}
-		prevID = vm.VmId
+		prevID = vmID
 	}
 
 	// Generate the next num VMIDs
