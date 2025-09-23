@@ -66,9 +66,10 @@ type GroupsRequest struct {
 }
 
 type AdminCloneRequest struct {
-	Template  string   `json:"template" binding:"required,min=1,max=100" validate:"alphanum,ascii"`
-	Usernames []string `json:"usernames" binding:"omitempty,dive,min=1,max=100" validate:"dive,alphanum,ascii"`
-	Groups    []string `json:"groups" binding:"omitempty,dive,min=1,max=100" validate:"dive,alphanum,ascii"`
+	Template     string   `json:"template" binding:"required,min=1,max=100" validate:"alphanum,ascii"`
+	Usernames    []string `json:"usernames" binding:"omitempty,dive,min=1,max=100" validate:"dive,alphanum,ascii"`
+	Groups       []string `json:"groups" binding:"omitempty,dive,min=1,max=100" validate:"dive,alphanum,ascii"`
+	StartingVMID int      `json:"starting_vmid" binding:"omitempty,min=100,max=999900"`
 }
 
 type DeletePodRequest struct {

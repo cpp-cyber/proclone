@@ -72,12 +72,12 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	if req.CheckExistingDeployments {
 		for _, target := range req.Targets {
 			targetPoolName := fmt.Sprintf("%s_%s", req.Template, target.Name)
-			isDeployed, err := cs.IsDeployed(targetPoolName)
+			isValid, err := cs.ValidateCloneRequest(targetPoolName, target.Name)
 			if err != nil {
-				return fmt.Errorf("failed to check if template is deployed for %s: %w", target.Name, err)
+				return fmt.Errorf("failed to validate the deployment of template for %s: %w", target.Name, err)
 			}
-			if isDeployed {
-				return fmt.Errorf("template %s is already or in the process of being deployed for %s", req.Template, target.Name)
+			if !isValid {
+				return fmt.Errorf("template %s is already deployed for %s or they have exceeded the maximum of 5 deployed pods", req.Template, target.Name)
 			}
 		}
 	}
@@ -127,9 +127,22 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		return fmt.Errorf("failed to get next pod IDs: %w", err)
 	}
 
-	vmIDs, err := cs.ProxmoxService.GetNextVMIDs(len(req.Targets) * numVMsPerTarget)
-	if err != nil {
-		return fmt.Errorf("failed to get next VM IDs: %w", err)
+	// Lock the vmid allocation mutex to prevent race conditions during vmid allocation
+	cs.vmidMutex.Lock()
+
+	// Use StartingVMID from request if provided, otherwise get next available VMIDs
+	var vmIDs []int
+	numVMs := len(req.Targets) * numVMsPerTarget
+	if req.StartingVMID != 0 {
+		log.Printf("Starting VMID allocation from specified starting VMID: %d", req.StartingVMID)
+		for i := range numVMs {
+			vmIDs = append(vmIDs, req.StartingVMID+i)
+		}
+	} else {
+		vmIDs, err = cs.ProxmoxService.GetNextVMIDs(numVMs)
+		if err != nil {
+			return fmt.Errorf("failed to get next VM IDs: %w", err)
+		}
 	}
 
 	for i := range req.Targets {
@@ -169,7 +182,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 			NewVMID:    target.VMIDs[0],
 			TargetNode: bestNode,
 		}
-		err = cs.ProxmoxService.CloneVMWithConfig(routerCloneReq)
+		err = cs.ProxmoxService.CloneVM(routerCloneReq)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to clone router VM for %s: %v", target.Name, err))
 		} else {
@@ -191,7 +204,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 				NewVMID:    target.VMIDs[i+1],
 				TargetNode: bestNode,
 			}
-			err := cs.ProxmoxService.CloneVMWithConfig(vmCloneReq)
+			err := cs.ProxmoxService.CloneVM(vmCloneReq)
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("failed to clone VM %s for %s: %v", vm.Name, target.Name, err))
 			}
@@ -222,6 +235,9 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 			time.Sleep(2 * time.Second)
 		}
 	}
+
+	// Release the vmid allocation mutex now that all of the VMs are cloned on proxmox
+	cs.vmidMutex.Unlock()
 
 	// 9. Configure VNet of all VMs
 	log.Printf("Configuring VNets for %d targets", len(req.Targets))
@@ -254,12 +270,8 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		}
 
 		// Wait for router to be running
-		routerVM := proxmox.VM{
-			Node: routerInfo.Node,
-			VMID: routerInfo.VMID,
-		}
 		log.Printf("Waiting for router VM to be running for %s (VMID: %d)", routerInfo.TargetName, routerInfo.VMID)
-		err = cs.ProxmoxService.WaitForRunning(routerVM)
+		err = cs.ProxmoxService.WaitForRunning(routerInfo.Node, routerInfo.VMID)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to start router VM for %s: %v", routerInfo.TargetName, err))
 		}
@@ -268,14 +280,8 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	// 11. Configure all pod routers (separate step after all routers are running)
 	log.Printf("Configuring %d pod routers", len(clonedRouters))
 	for _, routerInfo := range clonedRouters {
-		// Only configure routers that successfully started
-		routerVM := proxmox.VM{
-			Node: routerInfo.Node,
-			VMID: routerInfo.VMID,
-		}
-
 		// Double-check that router is still running before configuration
-		err = cs.ProxmoxService.WaitForRunning(routerVM)
+		err = cs.ProxmoxService.WaitForRunning(routerInfo.Node, routerInfo.VMID)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("router not running before configuration for %s: %v", routerInfo.TargetName, err))
 			continue
@@ -360,7 +366,7 @@ func (cs *CloningService) DeletePod(pod string) error {
 	// Wait for all previously running VMs to be stopped
 	if len(runningVMs) > 0 {
 		for _, vm := range runningVMs {
-			if err := cs.ProxmoxService.WaitForStopped(vm); err != nil {
+			if err := cs.ProxmoxService.WaitForStopped(vm.Node, vm.VMID); err != nil {
 				// Continue with deletion even if we can't confirm the VM is stopped
 			}
 		}

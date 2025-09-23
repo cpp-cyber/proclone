@@ -43,12 +43,14 @@ type Service interface {
 	RebootVM(node string, vmID int) error
 	StopVM(node string, vmID int) error
 	DeleteVM(node string, vmID int) error
+	GetVMSnapshots(node string, vmID int) ([]VMSnapshot, error)
+	DeleteVMSnapshot(node string, vmID int, snapshotName string) error
 	ConvertVMToTemplate(node string, vmID int) error
-	CloneVMWithConfig(req VMCloneRequest) error
-	WaitForCloneCompletion(vm *VM, timeout time.Duration) error
-	WaitForDisk(node string, vmid int, maxWait time.Duration) error
-	WaitForRunning(vm VM) error
-	WaitForStopped(vm VM) error
+	CloneVM(req VMCloneRequest) error
+	WaitForDisk(node string, vmID int, maxWait time.Duration) error
+	WaitForLock(node string, vmID int) error
+	WaitForRunning(node string, vmID int) error
+	WaitForStopped(node string, vmID int) error
 
 	// Pool Management
 	GetPoolVMs(poolName string) ([]VirtualResource, error)
@@ -89,7 +91,7 @@ type ProxmoxNodeStatus struct {
 
 type VirtualResourceConfig struct {
 	HardDisk string `json:"scsi0"`
-	Lock     string `json:"lock,omitempty"`
+	Lock     string `json:"lock"`
 	Net0     string `json:"net0"`
 	Net1     string `json:"net1,omitempty"`
 }
@@ -113,7 +115,12 @@ type VMCloneRequest struct {
 	PoolName   string
 	PodID      string
 	NewVMID    int
+	Full       int
 	TargetNode string
+}
+
+type VMSnapshot struct {
+	Name string `json:"name"`
 }
 
 type VirtualResource struct {

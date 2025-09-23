@@ -75,6 +75,65 @@ func (s *LDAPService) GetUsers() ([]User, error) {
 	return users, nil
 }
 
+func (s *LDAPService) GetUser(username string) (*User, error) {
+	kaminoUsersGroupDN := "CN=KaminoUsers,OU=KaminoGroups," + s.client.config.BaseDN
+	searchRequest := ldapv3.NewSearchRequest(
+		s.client.config.BaseDN, ldapv3.ScopeWholeSubtree, ldapv3.NeverDerefAliases, 0, 0, false,
+		fmt.Sprintf("(&(objectClass=user)(sAMAccountName=%s)(memberOf=%s))", username, kaminoUsersGroupDN), // Filter for specific user in KaminoUsers group
+		[]string{"sAMAccountName", "dn", "whenCreated", "memberOf", "userAccountControl"},                  // Attributes to retrieve
+		nil,
+	)
+
+	searchResult, err := s.client.Search(searchRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search for user: %v", err)
+	}
+
+	if len(searchResult.Entries) == 0 {
+		return nil, fmt.Errorf("user '%s' not found", username)
+	}
+
+	entry := searchResult.Entries[0]
+	user := User{
+		Name: entry.GetAttributeValue("sAMAccountName"),
+	}
+
+	whenCreated := entry.GetAttributeValue("whenCreated")
+	if whenCreated != "" {
+		// AD stores dates in GeneralizedTime format: YYYYMMDDHHMMSS.0Z
+		if parsedTime, err := time.Parse("20060102150405.0Z", whenCreated); err == nil {
+			user.CreatedAt = parsedTime.Format("2006-01-02 15:04:05")
+		}
+	}
+
+	// Check if user is enabled
+	userAccountControl := entry.GetAttributeValue("userAccountControl")
+	if userAccountControl != "" {
+		uac, err := strconv.Atoi(userAccountControl)
+		if err == nil {
+			// UF_ACCOUNTDISABLE = 0x02
+			user.Enabled = (uac & 0x02) == 0
+		}
+	}
+
+	// Check if user is admin
+	memberOfValues := entry.GetAttributeValues("memberOf")
+	for _, memberOf := range memberOfValues {
+		if strings.Contains(memberOf, s.client.config.AdminGroupDN) {
+			user.IsAdmin = true
+			break
+		}
+	}
+
+	// Get user groups
+	groups, err := getUserGroupsFromMemberOf(memberOfValues)
+	if err == nil {
+		user.Groups = groups
+	}
+
+	return &user, nil
+}
+
 func (s *LDAPService) CreateUser(userInfo UserRegistrationInfo) (string, error) {
 	// Create DN for new user in Users container
 	// TODO: Static

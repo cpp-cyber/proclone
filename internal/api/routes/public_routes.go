@@ -10,4 +10,5 @@ func registerPublicRoutes(g *gin.RouterGroup, authHandler *handlers.AuthHandler,
 	// GET Requests
 	g.GET("/health", handlers.HealthCheckHandler(authHandler, cloningHandler))
 	g.POST("/login", authHandler.LoginHandler)
+	// g.POST("/register", authHandler.RegisterHandler)
 }

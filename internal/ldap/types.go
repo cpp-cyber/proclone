@@ -13,6 +13,7 @@ import (
 type Service interface {
 	// User Management
 	GetUsers() ([]User, error)
+	GetUser(username string) (*User, error)
 	CreateAndRegisterUser(userInfo UserRegistrationInfo) error
 	DeleteUser(username string) error
 	AddUserToGroup(username string, groupName string) error
