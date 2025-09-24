@@ -11,6 +11,7 @@ import (
 	"github.com/cpp-cyber/proclone/internal/ldap"
 	"github.com/cpp-cyber/proclone/internal/proxmox"
 	"github.com/cpp-cyber/proclone/internal/tools"
+	"github.com/cpp-cyber/proclone/internal/tools/sse"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -88,6 +89,16 @@ func (ch *CloningHandler) CloneTemplateHandler(c *gin.Context) {
 		return
 	}
 
+	// Create new sse object for streaming
+	sseWriter, err := sse.NewWriter(c.Writer)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to initialize SSE",
+			"details": err.Error(),
+		})
+		return
+	}
+
 	// Create the cloning request using the new format
 	cloneReq := cloning.CloneRequest{
 		Template:                 req.Template,
@@ -98,6 +109,7 @@ func (ch *CloningHandler) CloneTemplateHandler(c *gin.Context) {
 				IsGroup: false,
 			},
 		},
+		SSE: sseWriter,
 	}
 
 	if err := ch.Service.CloneTemplate(cloneReq); err != nil {
@@ -144,16 +156,27 @@ func (ch *CloningHandler) AdminCloneTemplateHandler(c *gin.Context) {
 		})
 	}
 
+	// Create new sse object for streaming
+	sseWriter, err := sse.NewWriter(c.Writer)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to initialize SSE",
+			"details": err.Error(),
+		})
+		return
+	}
+
 	// Create clone request
 	cloneReq := cloning.CloneRequest{
 		Template:                 req.Template,
 		Targets:                  targets,
 		CheckExistingDeployments: false,
 		StartingVMID:             req.StartingVMID,
+		SSE:                      sseWriter,
 	}
 
 	// Perform clone operation
-	err := ch.Service.CloneTemplate(cloneReq)
+	err = ch.Service.CloneTemplate(cloneReq)
 	if err != nil {
 		log.Printf("Admin %s encountered error while bulk cloning template: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{

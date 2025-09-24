@@ -7,6 +7,7 @@ import (
 
 	"github.com/cpp-cyber/proclone/internal/ldap"
 	"github.com/cpp-cyber/proclone/internal/proxmox"
+	"github.com/cpp-cyber/proclone/internal/tools/sse"
 	"github.com/gin-gonic/gin"
 )
 
@@ -116,6 +117,7 @@ type CloneRequest struct {
 	Targets                  []CloneTarget
 	CheckExistingDeployments bool // Whether to check if templates are already deployed
 	StartingVMID             int  // Optional starting VMID for admin clones
+	SSE                      *sse.Writer
 }
 
 type RouterInfo struct {
@@ -123,4 +125,9 @@ type RouterInfo struct {
 	PodNumber  int
 	Node       string
 	VMID       int
+}
+
+type ProgressMessage struct {
+	Message  string `json:"message"`
+	Progress int    `json:"progress"`
 }
