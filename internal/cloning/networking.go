@@ -102,8 +102,10 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 	case "vyos":
 		reqBody := map[string]any{
 			"command": []string{
+				"vbash",
 				cs.Config.VYOSScriptPath,
-				fmt.Sprintf("%s%d.1", cs.Config.WANIPBase, podNumber),
+				fmt.Sprintf("%d", podNumber),
+				cs.Config.WANIPBase,
 			},
 		}
 
