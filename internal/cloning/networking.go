@@ -139,7 +139,7 @@ func (cs *CloningService) SetPodVnet(poolName string, vnetName string) error {
 
 	log.Printf("Setting VNet %s for %d VMs in pool %s", vnetName, len(vms), poolName)
 
-	routerRegex := regexp.MustCompile(`(?i).*(router|pfsense).*`)
+	routerRegex := regexp.MustCompile(`(?i).*(router|pfsense|vyos).*`)
 	var errors []string
 
 	for _, vm := range vms {
