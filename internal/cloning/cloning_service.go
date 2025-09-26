@@ -89,7 +89,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	for _, vm := range templatePool {
 		// Check to see if this VM is the router
 		lowerVMName := strings.ToLower(vm.Name)
-		if strings.Contains(lowerVMName, "router") || strings.Contains(lowerVMName, "pfsense") {
+		if strings.Contains(lowerVMName, "router") || strings.Contains(lowerVMName, "pfsense") || strings.Contains(lowerVMName, "vyos") {
 			router = &proxmox.VM{
 				Name: vm.Name,
 				Node: vm.NodeName,
@@ -186,9 +186,16 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to clone router VM for %s: %v", target.Name, err))
 		} else {
+			// Determine router type
+			routerType, err := cs.getRouterType(*router)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("failed to get router type for %s: %v", target.Name, err))
+			}
+
 			// Store router info for later operations
 			clonedRouters = append(clonedRouters, RouterInfo{
 				TargetName: target.Name,
+				RouterType: routerType,
 				PodNumber:  target.PodNumber,
 				Node:       bestNode,
 				VMID:       target.VMIDs[0],
@@ -288,7 +295,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		}
 
 		log.Printf("Configuring pod router for %s (Pod: %d, VMID: %d)", routerInfo.TargetName, routerInfo.PodNumber, routerInfo.VMID)
-		err = cs.configurePodRouter(routerInfo.PodNumber, routerInfo.Node, routerInfo.VMID)
+		err = cs.configurePodRouter(routerInfo.PodNumber, routerInfo.Node, routerInfo.VMID, routerInfo.RouterType)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to configure pod router for %s: %v", routerInfo.TargetName, err))
 		}
