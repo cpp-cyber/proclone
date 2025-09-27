@@ -23,7 +23,7 @@ func (cs *CloningService) GetPods(username string) ([]Pod, error) {
 
 	// Build regex pattern to match username or any of their group names
 	groupsWithUser := append(groups, username)
-	regexPattern := fmt.Sprintf(`1[0-9]{3}_.*_(%s)`, strings.Join(groupsWithUser, "|"))
+	regexPattern := fmt.Sprintf(`(?i)1[0-9]{3}_.*_(%s)`, strings.Join(groupsWithUser, "|"))
 
 	// Get pods based on regex pattern
 	pods, err := cs.MapVirtualResourcesToPods(regexPattern)
@@ -87,11 +87,11 @@ func (cs *CloningService) ValidateCloneRequest(templateName string, username str
 
 	for _, pod := range podPools {
 		// Remove the Pod ID number and _ to compare
-		if !alreadyDeployed && pod.Name[5:] == templateName {
+		if !alreadyDeployed && strings.EqualFold(pod.Name[5:], templateName) {
 			alreadyDeployed = true
 		}
 
-		if strings.Contains(pod.Name, username) {
+		if strings.Contains(strings.ToLower(pod.Name), strings.ToLower(username)) {
 			numDeployments++
 		}
 	}
