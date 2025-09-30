@@ -99,6 +99,13 @@ func (ch *CloningHandler) CloneTemplateHandler(c *gin.Context) {
 		return
 	}
 
+	sseWriter.Send(
+		cloning.ProgressMessage{
+			Message:  "Starting cloning process...",
+			Progress: 0,
+		},
+	)
+
 	// Create the cloning request using the new format
 	cloneReq := cloning.CloneRequest{
 		Template:                 req.Template,

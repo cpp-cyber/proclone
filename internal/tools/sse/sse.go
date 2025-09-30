@@ -21,6 +21,6 @@ func NewWriter(w http.ResponseWriter) (*Writer, error) {
 
 func (s *Writer) Send(message any) {
 	b, _ := json.Marshal(message)
-	fmt.Fprintf(s.w, "data: %s\n", b)
+	fmt.Fprintf(s.w, "data: %s\n\n", b)
 	s.f.Flush()
 }
