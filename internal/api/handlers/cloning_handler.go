@@ -89,6 +89,26 @@ func (ch *CloningHandler) CloneTemplateHandler(c *gin.Context) {
 		return
 	}
 
+	// Check for existing deployments before starting SSE
+	targetPoolName := fmt.Sprintf("%s_%s", req.Template, username)
+	isValid, err := ch.Service.ValidateCloneRequest(targetPoolName, username)
+	if err != nil {
+		log.Printf("Error validating deployment for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to validate existing deployments",
+			"details": err.Error(),
+		})
+		return
+	}
+	if !isValid {
+		log.Printf("Template %s is already deployed for user %s or they have exceeded deployment limits", req.Template, username)
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   "Deployment not allowed",
+			"details": fmt.Sprintf("Template %s is already deployed for %s or they have exceeded the maximum of 5 deployed pods", req.Template, username),
+		})
+		return
+	}
+
 	// Create new sse object for streaming
 	sseWriter, err := sse.NewWriter(c.Writer)
 	if err != nil {
@@ -101,7 +121,7 @@ func (ch *CloningHandler) CloneTemplateHandler(c *gin.Context) {
 
 	sseWriter.Send(
 		cloning.ProgressMessage{
-			Message:  "Starting cloning process...",
+			Message:  "Retrieving template information",
 			Progress: 0,
 		},
 	)
@@ -109,7 +129,7 @@ func (ch *CloningHandler) CloneTemplateHandler(c *gin.Context) {
 	// Create the cloning request using the new format
 	cloneReq := cloning.CloneRequest{
 		Template:                 req.Template,
-		CheckExistingDeployments: true, // Check for existing deployments for single user clones
+		CheckExistingDeployments: false, // Already checked above
 		Targets: []cloning.CloneTarget{
 			{
 				Name:    username,

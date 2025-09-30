@@ -63,13 +63,6 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	var clonedRouters []RouterInfo
 
 	// 1. Get the template pool and its VMs
-	req.SSE.Send(
-		ProgressMessage{
-			Message:  "Retrieving template information...",
-			Progress: 2,
-		},
-	)
-
 	templatePool, err := cs.ProxmoxService.GetPoolVMs("kamino_template_" + req.Template)
 	if err != nil {
 		return fmt.Errorf("failed to get template pool: %w", err)
@@ -77,13 +70,6 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 
 	// 2. Check if any template is already deployed (if requested)
 	if req.CheckExistingDeployments {
-		req.SSE.Send(
-			ProgressMessage{
-				Message:  "Checking existing deployments...",
-				Progress: 4,
-			},
-		)
-
 		for _, target := range req.Targets {
 			targetPoolName := fmt.Sprintf("%s_%s", req.Template, target.Name)
 			isValid, err := cs.ValidateCloneRequest(targetPoolName, target.Name)
@@ -97,13 +83,6 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	}
 
 	// 3. Identify router and other VMs
-	req.SSE.Send(
-		ProgressMessage{
-			Message:  "Identifying template VMs...",
-			Progress: 6,
-		},
-	)
-
 	var router *proxmox.VM
 	var templateVMs []proxmox.VM
 
@@ -140,13 +119,6 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	}
 
 	// 5. Get pod IDs, Numbers, and VMIDs and assign them to targets
-	req.SSE.Send(
-		ProgressMessage{
-			Message:  "Allocating resources...",
-			Progress: 8,
-		},
-	)
-
 	numVMsPerTarget := len(templateVMs) + 1 // +1 for router
 	log.Printf("Number of VMs per target (including router): %d", numVMsPerTarget)
 
@@ -184,13 +156,6 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	}
 
 	// 6. Create new pool for each target
-	req.SSE.Send(
-		ProgressMessage{
-			Message:  "Creating proxmox pool...",
-			Progress: 10,
-		},
-	)
-
 	for _, target := range req.Targets {
 		err = cs.ProxmoxService.CreateNewPool(target.PoolName)
 		if err != nil {
@@ -201,6 +166,13 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	}
 
 	// 7. Clone targets to proxmox
+	req.SSE.Send(
+		ProgressMessage{
+			Message:  "Cloning VMs",
+			Progress: 10,
+		},
+	)
+
 	for _, target := range req.Targets {
 		// Find best node per target
 		bestNode, err := cs.ProxmoxService.FindBestNode()
@@ -210,13 +182,6 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		}
 
 		// Clone router
-		req.SSE.Send(
-			ProgressMessage{
-				Message:  "Cloning router VM...",
-				Progress: 15,
-			},
-		)
-
 		routerCloneReq := proxmox.VMCloneRequest{
 			SourceVM:   *router,
 			PoolName:   target.PoolName,
@@ -246,13 +211,6 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 
 		// Clone each VM to new pool
 		for i, vm := range templateVMs {
-			req.SSE.Send(
-				ProgressMessage{
-					Message:  fmt.Sprintf("Cloning VM (%d/%d): %s", i+1, len(templateVMs), vm.Name),
-					Progress: 20 + int(float64(i+1)/float64(len(templateVMs))*20),
-				},
-			)
-
 			vmCloneReq := proxmox.VMCloneRequest{
 				SourceVM:   vm,
 				PoolName:   target.PoolName,
@@ -268,13 +226,6 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	}
 
 	// 8. Wait for all VM clone operations to complete before configuring VNets
-	req.SSE.Send(
-		ProgressMessage{
-			Message:  "Waiting for clone operations to complete...",
-			Progress: 42,
-		},
-	)
-
 	log.Printf("Waiting for clone operations to complete for %d targets", len(req.Targets))
 	for _, target := range req.Targets {
 		// Wait for all VMs in the pool to be properly cloned
@@ -303,12 +254,6 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	cs.vmidMutex.Unlock()
 
 	// 9. Configure VNet of all VMs
-	req.SSE.Send(
-		ProgressMessage{
-			Message:  "Configuring VNets...",
-			Progress: 45,
-		},
-	)
 	log.Printf("Configuring VNets for %d targets", len(req.Targets))
 	for _, target := range req.Targets {
 		vnetName := fmt.Sprintf("kamino%d", target.PodNumber)
@@ -323,7 +268,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	req.SSE.Send(
 		ProgressMessage{
 			Message:  "Starting routers...",
-			Progress: 50,
+			Progress: 25,
 		},
 	)
 	log.Printf("Starting %d routers", len(clonedRouters))
@@ -356,21 +301,12 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	req.SSE.Send(
 		ProgressMessage{
 			Message:  "Configuring pod routers (This may take a few minutes)...",
-			Progress: 60,
+			Progress: 33,
 		},
 	)
 
 	log.Printf("Configuring %d pod routers", len(clonedRouters))
-	for i, routerInfo := range clonedRouters {
-		// Send progress update for each router being configured
-		routerProgress := 60 + int(float64(i)/float64(len(clonedRouters))*30)
-		req.SSE.Send(
-			ProgressMessage{
-				Message:  fmt.Sprintf("Configuring router (%d/%d)...", i+1, len(clonedRouters)),
-				Progress: routerProgress,
-			},
-		)
-
+	for _, routerInfo := range clonedRouters {
 		// Double-check that router is still running before configuration
 		err = cs.ProxmoxService.WaitForRunning(routerInfo.Node, routerInfo.VMID)
 		if err != nil {
@@ -394,12 +330,6 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	)
 
 	// 12. Set permissions on the pool to the user/group
-	req.SSE.Send(
-		ProgressMessage{
-			Message:  "Setting pool permissions...",
-			Progress: 95,
-		},
-	)
 	for _, target := range req.Targets {
 		err = cs.ProxmoxService.SetPoolPermission(target.PoolName, target.Name, target.IsGroup)
 		if err != nil {
