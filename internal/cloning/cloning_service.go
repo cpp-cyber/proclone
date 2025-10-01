@@ -267,7 +267,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	// 10. Start all routers and wait for them to be running
 	req.SSE.Send(
 		ProgressMessage{
-			Message:  "Starting routers...",
+			Message:  "Starting routers",
 			Progress: 25,
 		},
 	)
@@ -300,7 +300,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	// 11. Configure all pod routers (separate step after all routers are running)
 	req.SSE.Send(
 		ProgressMessage{
-			Message:  "Configuring pod routers (This may take a few minutes)...",
+			Message:  "Configuring pod routers",
 			Progress: 33,
 		},
 	)
@@ -324,7 +324,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	// Router configuration complete - update progress
 	req.SSE.Send(
 		ProgressMessage{
-			Message:  "Finalizing deployment...",
+			Message:  "Finalizing deployment",
 			Progress: 90,
 		},
 	)
