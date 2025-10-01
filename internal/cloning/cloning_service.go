@@ -324,7 +324,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	// Router configuration complete - update progress
 	req.SSE.Send(
 		ProgressMessage{
-			Message:  "Router configuration complete. Finalizing deployment...",
+			Message:  "Finalizing deployment...",
 			Progress: 90,
 		},
 	)
@@ -343,19 +343,19 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		errors = append(errors, fmt.Sprintf("failed to increment template deployments for %s: %v", req.Template, err))
 	}
 
+	// Final completion message
+	// req.SSE.Send(
+	// 	ProgressMessage{
+	// 		Message:  "Template cloning completed!",
+	// 		Progress: 100,
+	// 	},
+	// )
+
 	// Handle errors and cleanup if necessary
 	if len(errors) > 0 {
 		cs.cleanupFailedClones(createdPools)
 		return fmt.Errorf("bulk clone operation completed with errors: %v", errors)
 	}
-
-	// Final completion message
-	req.SSE.Send(
-		ProgressMessage{
-			Message:  "Template cloning completed successfully!",
-			Progress: 100,
-		},
-	)
 
 	return nil
 }
@@ -400,9 +400,7 @@ func (cs *CloningService) DeletePod(pod string) error {
 					VMID: vm.VmId,
 				})
 				stoppedCount++
-			} else {
 			}
-		} else {
 		}
 	}
 
