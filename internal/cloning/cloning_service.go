@@ -344,12 +344,12 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	}
 
 	// Final completion message
-	// req.SSE.Send(
-	// 	ProgressMessage{
-	// 		Message:  "Template cloning completed!",
-	// 		Progress: 100,
-	// 	},
-	// )
+	req.SSE.Send(
+		ProgressMessage{
+			Message:  "Template cloning completed!",
+			Progress: 100,
+		},
+	)
 
 	// Handle errors and cleanup if necessary
 	if len(errors) > 0 {
