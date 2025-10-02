@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
+	"regexp"
 	"time"
 
 	"github.com/cpp-cyber/proclone/internal/ldap"
@@ -85,11 +85,11 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	// 3. Identify router and other VMs
 	var router *proxmox.VM
 	var templateVMs []proxmox.VM
+	routerPattern := regexp.MustCompile(`(?i)(router|pfsense|vyos)`)
 
 	for _, vm := range templatePool {
 		// Check to see if this VM is the router
-		lowerVMName := strings.ToLower(vm.Name)
-		if strings.Contains(lowerVMName, "router") || strings.Contains(lowerVMName, "pfsense") || strings.Contains(lowerVMName, "vyos") {
+		if routerPattern.MatchString(vm.Name) {
 			router = &proxmox.VM{
 				Name: vm.Name,
 				Node: vm.NodeName,
