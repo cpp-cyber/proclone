@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
+	"regexp"
 	"time"
 
 	"github.com/cpp-cyber/proclone/internal/ldap"
@@ -85,11 +85,11 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	// 3. Identify router and other VMs
 	var router *proxmox.VM
 	var templateVMs []proxmox.VM
+	routerPattern := regexp.MustCompile(`(?i)(router|pfsense|vyos)`)
 
 	for _, vm := range templatePool {
 		// Check to see if this VM is the router
-		lowerVMName := strings.ToLower(vm.Name)
-		if strings.Contains(lowerVMName, "router") || strings.Contains(lowerVMName, "pfsense") {
+		if routerPattern.MatchString(vm.Name) {
 			router = &proxmox.VM{
 				Name: vm.Name,
 				Node: vm.NodeName,
@@ -166,6 +166,13 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	}
 
 	// 7. Clone targets to proxmox
+	req.SSE.Send(
+		ProgressMessage{
+			Message:  "Cloning VMs",
+			Progress: 10,
+		},
+	)
+
 	for _, target := range req.Targets {
 		// Find best node per target
 		bestNode, err := cs.ProxmoxService.FindBestNode()
@@ -186,9 +193,16 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to clone router VM for %s: %v", target.Name, err))
 		} else {
+			// Determine router type
+			routerType, err := cs.getRouterType(*router)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("failed to get router type for %s: %v", target.Name, err))
+			}
+
 			// Store router info for later operations
 			clonedRouters = append(clonedRouters, RouterInfo{
 				TargetName: target.Name,
+				RouterType: routerType,
 				PodNumber:  target.PodNumber,
 				Node:       bestNode,
 				VMID:       target.VMIDs[0],
@@ -251,6 +265,12 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	}
 
 	// 10. Start all routers and wait for them to be running
+	req.SSE.Send(
+		ProgressMessage{
+			Message:  "Starting routers",
+			Progress: 25,
+		},
+	)
 	log.Printf("Starting %d routers", len(clonedRouters))
 	for _, routerInfo := range clonedRouters {
 		// Wait for router disk to be available
@@ -278,6 +298,13 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	}
 
 	// 11. Configure all pod routers (separate step after all routers are running)
+	req.SSE.Send(
+		ProgressMessage{
+			Message:  "Configuring pod routers",
+			Progress: 33,
+		},
+	)
+
 	log.Printf("Configuring %d pod routers", len(clonedRouters))
 	for _, routerInfo := range clonedRouters {
 		// Double-check that router is still running before configuration
@@ -288,11 +315,19 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		}
 
 		log.Printf("Configuring pod router for %s (Pod: %d, VMID: %d)", routerInfo.TargetName, routerInfo.PodNumber, routerInfo.VMID)
-		err = cs.configurePodRouter(routerInfo.PodNumber, routerInfo.Node, routerInfo.VMID)
+		err = cs.configurePodRouter(routerInfo.PodNumber, routerInfo.Node, routerInfo.VMID, routerInfo.RouterType)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to configure pod router for %s: %v", routerInfo.TargetName, err))
 		}
 	}
+
+	// Router configuration complete - update progress
+	req.SSE.Send(
+		ProgressMessage{
+			Message:  "Finalizing deployment",
+			Progress: 90,
+		},
+	)
 
 	// 12. Set permissions on the pool to the user/group
 	for _, target := range req.Targets {
@@ -307,6 +342,14 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("failed to increment template deployments for %s: %v", req.Template, err))
 	}
+
+	// Final completion message
+	req.SSE.Send(
+		ProgressMessage{
+			Message:  "Template cloning completed!",
+			Progress: 100,
+		},
+	)
 
 	// Handle errors and cleanup if necessary
 	if len(errors) > 0 {
@@ -357,9 +400,7 @@ func (cs *CloningService) DeletePod(pod string) error {
 					VMID: vm.VmId,
 				})
 				stoppedCount++
-			} else {
 			}
-		} else {
 		}
 	}
 

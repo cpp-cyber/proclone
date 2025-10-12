@@ -5,13 +5,35 @@ import (
 	"log"
 	"math"
 	"regexp"
+	"strings"
 	"time"
 
+	"github.com/cpp-cyber/proclone/internal/proxmox"
 	"github.com/cpp-cyber/proclone/internal/tools"
 )
 
+func (cs *CloningService) getRouterType(router proxmox.VM) (string, error) {
+	infoReq := tools.ProxmoxAPIRequest{
+		Method:   "GET",
+		Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/config", router.Node, router.VMID),
+	}
+
+	infoRsp, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(infoReq)
+	if err != nil {
+		return "", fmt.Errorf("request for router type failed: %v", err)
+	}
+	switch {
+	case strings.Contains(string(infoRsp), "pfsense"):
+		return "pfsense", nil
+	case strings.Contains(string(infoRsp), "vyos"):
+		return "vyos", nil
+	default:
+		return "", fmt.Errorf("router type not defined")
+	}
+}
+
 // configurePodRouter configures the pod router with proper networking settings
-func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid int) error {
+func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid int, routerType string) error {
 	// Wait for router agent to be pingable
 	statusReq := tools.ProxmoxAPIRequest{
 		Method:   "POST",
@@ -37,42 +59,68 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
 	}
 
-	// Configure router WAN IP to have correct third octet using qemu agent API call
-	reqBody := map[string]any{
-		"command": []string{
-			cs.Config.WANScriptPath,
-			fmt.Sprintf("%s%d.1", cs.Config.WANIPBase, podNumber),
-		},
-	}
+	// Clone depending on router type
+	switch routerType {
+	case "pfsense":
+		// Configure router WAN IP to have correct third octet using qemu agent API call
+		reqBody := map[string]any{
+			"command": []string{
+				cs.Config.WANScriptPath,
+				fmt.Sprintf("%s%d.1", cs.Config.WANIPBase, podNumber),
+			},
+		}
 
-	execReq := tools.ProxmoxAPIRequest{
-		Method:      "POST",
-		Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/agent/exec", node, vmid),
-		RequestBody: reqBody,
-	}
+		execReq := tools.ProxmoxAPIRequest{
+			Method:      "POST",
+			Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/agent/exec", node, vmid),
+			RequestBody: reqBody,
+		}
 
-	_, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(execReq)
-	if err != nil {
-		return fmt.Errorf("failed to make IP change request: %v", err)
-	}
+		_, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(execReq)
+		if err != nil {
+			return fmt.Errorf("failed to make IP change request: %v", err)
+		}
 
-	// Send agent exec request to change VIP subnet
-	vipReqBody := map[string]any{
-		"command": []string{
-			cs.Config.VIPScriptPath,
-			fmt.Sprintf("%s%d.0", cs.Config.WANIPBase, podNumber),
-		},
-	}
+		// Send agent exec request to change VIP subnet
+		vipReqBody := map[string]any{
+			"command": []string{
+				cs.Config.VIPScriptPath,
+				fmt.Sprintf("%s%d.0", cs.Config.WANIPBase, podNumber),
+			},
+		}
 
-	vipExecReq := tools.ProxmoxAPIRequest{
-		Method:      "POST",
-		Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/agent/exec", node, vmid),
-		RequestBody: vipReqBody,
-	}
+		vipExecReq := tools.ProxmoxAPIRequest{
+			Method:      "POST",
+			Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/agent/exec", node, vmid),
+			RequestBody: vipReqBody,
+		}
 
-	_, err = cs.ProxmoxService.GetRequestHelper().MakeRequest(vipExecReq)
-	if err != nil {
-		return fmt.Errorf("failed to make VIP change request: %v", err)
+		_, err = cs.ProxmoxService.GetRequestHelper().MakeRequest(vipExecReq)
+		if err != nil {
+			return fmt.Errorf("failed to make VIP change request: %v", err)
+		}
+	case "vyos":
+		reqBody := map[string]any{
+			"command": []string{
+				"sh",
+				"-c",
+				fmt.Sprintf("sed -i -e 's/{{THIRD_OCTET}}/%d/g;s/{{NETWORK_PREFIX}}/%s/g' %s", podNumber, cs.Config.WANIPBase, cs.Config.VYOSScriptPath),
+			},
+		}
+
+		execReq := tools.ProxmoxAPIRequest{
+			Method:      "POST",
+			Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/agent/exec", node, vmid),
+			RequestBody: reqBody,
+		}
+
+		_, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(execReq)
+		if err != nil {
+			return fmt.Errorf("failed to make IP change request: %v", err)
+		}
+
+	default:
+		return fmt.Errorf("router type invalid")
 	}
 
 	return nil
@@ -91,7 +139,7 @@ func (cs *CloningService) SetPodVnet(poolName string, vnetName string) error {
 
 	log.Printf("Setting VNet %s for %d VMs in pool %s", vnetName, len(vms), poolName)
 
-	routerRegex := regexp.MustCompile(`(?i).*(router|pfsense).*`)
+	routerRegex := regexp.MustCompile(`(?i).*(router|pfsense|vyos).*`)
 	var errors []string
 
 	for _, vm := range vms {

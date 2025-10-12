@@ -91,7 +91,7 @@ func (dh *DashboardHandler) GetUserDashboardStatsHandler(c *gin.Context) {
 
 	// Loop through the user's deployed pods and add template information
 	for i := range pods {
-		templateName := strings.Replace(pods[i].Name[5:], fmt.Sprintf("_%s", username), "", 1)
+		templateName := strings.Replace(strings.ToLower(pods[i].Name[5:]), fmt.Sprintf("_%s", strings.ToLower(username)), "", 1)
 		templateInfo, err := dh.cloningHandler.Service.DatabaseService.GetTemplateInfo(templateName)
 		if err != nil {
 			log.Printf("Error retrieving template info for pod %s: %v", pods[i].Name, err)

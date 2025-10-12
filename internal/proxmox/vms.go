@@ -140,9 +140,10 @@ func (s *ProxmoxService) WaitForDisk(node string, vmID int, maxWait time.Duratio
 		}
 
 		if configResp.HardDisk != "" {
+			//TODO/NOTE: Using static node "gonk" here because it seems to be the most reliable
 			pendingReq := tools.ProxmoxAPIRequest{
 				Method:   "GET",
-				Endpoint: fmt.Sprintf("/nodes/%s/storage/%s/content?vmid=%d", node, s.Config.StorageID, vmID),
+				Endpoint: fmt.Sprintf("/nodes/gonk/storage/%s/content?vmid=%d", s.Config.StorageID, vmID),
 			}
 
 			var diskResponse []PendingDiskResponse

@@ -11,6 +11,7 @@ import (
 	"github.com/cpp-cyber/proclone/internal/ldap"
 	"github.com/cpp-cyber/proclone/internal/proxmox"
 	"github.com/cpp-cyber/proclone/internal/tools"
+	"github.com/cpp-cyber/proclone/internal/tools/sse"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -88,16 +89,54 @@ func (ch *CloningHandler) CloneTemplateHandler(c *gin.Context) {
 		return
 	}
 
+	// Check for existing deployments before starting SSE
+	targetPoolName := fmt.Sprintf("%s_%s", req.Template, username)
+	isValid, err := ch.Service.ValidateCloneRequest(targetPoolName, username)
+	if err != nil {
+		log.Printf("Error validating deployment for user %s: %v", username, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to validate existing deployments",
+			"details": err.Error(),
+		})
+		return
+	}
+	if !isValid {
+		log.Printf("Template %s is already deployed for user %s or they have exceeded deployment limits", req.Template, username)
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   "Deployment not allowed",
+			"details": fmt.Sprintf("Template %s is already deployed for %s or they have exceeded the maximum of 5 deployed pods", req.Template, username),
+		})
+		return
+	}
+
+	// Create new sse object for streaming
+	sseWriter, err := sse.NewWriter(c.Writer)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to initialize SSE",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	sseWriter.Send(
+		cloning.ProgressMessage{
+			Message:  "Retrieving template information",
+			Progress: 0,
+		},
+	)
+
 	// Create the cloning request using the new format
 	cloneReq := cloning.CloneRequest{
 		Template:                 req.Template,
-		CheckExistingDeployments: true, // Check for existing deployments for single user clones
+		CheckExistingDeployments: false, // Already checked above
 		Targets: []cloning.CloneTarget{
 			{
 				Name:    username,
 				IsGroup: false,
 			},
 		},
+		SSE: sseWriter,
 	}
 
 	if err := ch.Service.CloneTemplate(cloneReq); err != nil {
@@ -144,16 +183,27 @@ func (ch *CloningHandler) AdminCloneTemplateHandler(c *gin.Context) {
 		})
 	}
 
+	// Create new sse object for streaming
+	sseWriter, err := sse.NewWriter(c.Writer)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to initialize SSE",
+			"details": err.Error(),
+		})
+		return
+	}
+
 	// Create clone request
 	cloneReq := cloning.CloneRequest{
 		Template:                 req.Template,
 		Targets:                  targets,
 		CheckExistingDeployments: false,
 		StartingVMID:             req.StartingVMID,
+		SSE:                      sseWriter,
 	}
 
 	// Perform clone operation
-	err := ch.Service.CloneTemplate(cloneReq)
+	err = ch.Service.CloneTemplate(cloneReq)
 	if err != nil {
 		log.Printf("Admin %s encountered error while bulk cloning template: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -264,7 +314,7 @@ func (ch *CloningHandler) GetPodsHandler(c *gin.Context) {
 
 	// Loop through the user's deployed pods and add template information
 	for i := range pods {
-		templateName := strings.Replace(pods[i].Name[5:], fmt.Sprintf("_%s", username), "", 1)
+		templateName := strings.Replace(strings.ToLower(pods[i].Name[5:]), fmt.Sprintf("_%s", strings.ToLower(username)), "", 1)
 		templateInfo, err := ch.Service.DatabaseService.GetTemplateInfo(templateName)
 		if err != nil {
 			log.Printf("Error retrieving template info for pod %s: %v", pods[i].Name, err)

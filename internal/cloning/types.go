@@ -7,12 +7,13 @@ import (
 
 	"github.com/cpp-cyber/proclone/internal/ldap"
 	"github.com/cpp-cyber/proclone/internal/proxmox"
+	"github.com/cpp-cyber/proclone/internal/tools/sse"
 	"github.com/gin-gonic/gin"
 )
 
 // Config holds the configuration for cloning operations
 type Config struct {
-	RouterName        string        `envconfig:"ROUTER_NAME" default:"1-1NAT-pfsense"`
+	RouterName        string        `envconfig:"ROUTER_NAME" default:"1-1NAT-vyos"`
 	RouterVMID        int           `envconfig:"ROUTER_VMID"`
 	RouterNode        string        `envconfig:"ROUTER_NODE"`
 	MinPodID          int           `envconfig:"MIN_POD_ID" default:"1001"`
@@ -22,6 +23,7 @@ type Config struct {
 	SDNApplyTimeout   time.Duration `envconfig:"SDN_APPLY_TIMEOUT" default:"30s"`
 	WANScriptPath     string        `envconfig:"WAN_SCRIPT_PATH" default:"/home/update-wan-ip.sh"`
 	VIPScriptPath     string        `envconfig:"VIP_SCRIPT_PATH" default:"/home/update-wan-vip.sh"`
+	VYOSScriptPath    string        `envconfig:"VYOS_SCRIPT_PATH" default:"/config/scripts/vyos-postconfig-bootup.script"`
 	WANIPBase         string        `envconfig:"WAN_IP_BASE" default:"172.16."`
 }
 
@@ -116,11 +118,18 @@ type CloneRequest struct {
 	Targets                  []CloneTarget
 	CheckExistingDeployments bool // Whether to check if templates are already deployed
 	StartingVMID             int  // Optional starting VMID for admin clones
+	SSE                      *sse.Writer
 }
 
 type RouterInfo struct {
 	TargetName string
+	RouterType string
 	PodNumber  int
 	Node       string
 	VMID       int
+}
+
+type ProgressMessage struct {
+	Message  string `json:"message"`
+	Progress int    `json:"progress"`
 }
