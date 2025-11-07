@@ -155,11 +155,17 @@ func (s *ProxmoxService) WaitForDisk(node string, vmID int, maxWait time.Duratio
 			continue
 		}
 
+		log.Printf("%+v", configResp)
+
 		if configResp.HardDisk != "" {
+			log.Printf("/nodes/%s/storage/%s/content?vmid=%d", s.Config.Nodes[0], s.Config.StorageID, vmID)
+
 			pendingReq := tools.ProxmoxAPIRequest{
 				Method:   "GET",
 				Endpoint: fmt.Sprintf("/nodes/%s/storage/%s/content?vmid=%d", s.Config.Nodes[0], s.Config.StorageID, vmID),
 			}
+
+			log.Printf("%+v", pendingReq)
 
 			var diskResponse []PendingDiskResponse
 			err := s.RequestHelper.MakeRequestAndUnmarshal(pendingReq, &diskResponse)
@@ -168,10 +174,12 @@ func (s *ProxmoxService) WaitForDisk(node string, vmID int, maxWait time.Duratio
 				continue
 			}
 
+			log.Printf("%+v", diskResponse)
+
 			// Iterate through all disks, if all have valid Used and Size (not 0) consider available
 			allAvailable := true
 			for _, disk := range diskResponse {
-				if disk.Used == 0 || disk.Size == 0 {
+				if disk.Size == 0 {
 					allAvailable = false
 					break
 				}
