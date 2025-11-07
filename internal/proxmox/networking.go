@@ -1,4 +1,4 @@
-package cloning
+package proxmox
 
 import (
 	"fmt"
@@ -8,17 +8,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cpp-cyber/proclone/internal/proxmox"
 	"github.com/cpp-cyber/proclone/internal/tools"
 )
 
-func (cs *CloningService) getRouterType(router proxmox.VM) (string, error) {
+// RouterConfig holds configuration needed for router operations
+type RouterConfig struct {
+	RouterWaitTimeout time.Duration
+	WANScriptPath     string
+	VIPScriptPath     string
+	VYOSScriptPath    string
+	WANIPBase         string
+}
+
+func (s *ProxmoxService) GetRouterType(router VM) (string, error) {
 	infoReq := tools.ProxmoxAPIRequest{
 		Method:   "GET",
 		Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/config", router.Node, router.VMID),
 	}
 
-	infoRsp, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(infoReq)
+	infoRsp, err := s.RequestHelper.MakeRequest(infoReq)
 	if err != nil {
 		return "", fmt.Errorf("request for router type failed: %v", err)
 	}
@@ -32,8 +40,16 @@ func (cs *CloningService) getRouterType(router proxmox.VM) (string, error) {
 	}
 }
 
-// configurePodRouter configures the pod router with proper networking settings
-func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid int, routerType string) error {
+// ConfigurePodRouter configures the pod router with proper networking settings
+func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int, routerType string) error {
+	config := RouterConfig{
+		RouterWaitTimeout: s.Config.RouterWaitTimeout,
+		WANScriptPath:     s.Config.WANScriptPath,
+		VIPScriptPath:     s.Config.VIPScriptPath,
+		VYOSScriptPath:    s.Config.VYOSScriptPath,
+		WANIPBase:         s.Config.WANIPBase,
+	}
+
 	// Wait for router agent to be pingable
 	statusReq := tools.ProxmoxAPIRequest{
 		Method:   "POST",
@@ -50,7 +66,7 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 			return fmt.Errorf("router qemu agent timed out")
 		}
 
-		_, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(statusReq)
+		_, err := s.RequestHelper.MakeRequest(statusReq)
 		if err == nil {
 			break // Agent is responding
 		}
@@ -65,8 +81,8 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 		// Configure router WAN IP to have correct third octet using qemu agent API call
 		reqBody := map[string]any{
 			"command": []string{
-				cs.Config.WANScriptPath,
-				fmt.Sprintf("%s%d.1", cs.Config.WANIPBase, podNumber),
+				config.WANScriptPath,
+				fmt.Sprintf("%s%d.1", config.WANIPBase, podNumber),
 			},
 		}
 
@@ -76,7 +92,7 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 			RequestBody: reqBody,
 		}
 
-		_, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(execReq)
+		_, err := s.RequestHelper.MakeRequest(execReq)
 		if err != nil {
 			return fmt.Errorf("failed to make IP change request: %v", err)
 		}
@@ -84,8 +100,8 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 		// Send agent exec request to change VIP subnet
 		vipReqBody := map[string]any{
 			"command": []string{
-				cs.Config.VIPScriptPath,
-				fmt.Sprintf("%s%d.0", cs.Config.WANIPBase, podNumber),
+				config.VIPScriptPath,
+				fmt.Sprintf("%s%d.0", config.WANIPBase, podNumber),
 			},
 		}
 
@@ -95,7 +111,7 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 			RequestBody: vipReqBody,
 		}
 
-		_, err = cs.ProxmoxService.GetRequestHelper().MakeRequest(vipExecReq)
+		_, err = s.RequestHelper.MakeRequest(vipExecReq)
 		if err != nil {
 			return fmt.Errorf("failed to make VIP change request: %v", err)
 		}
@@ -104,7 +120,7 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 			"command": []string{
 				"sh",
 				"-c",
-				fmt.Sprintf("sed -i -e 's/{{THIRD_OCTET}}/%d/g;s/{{NETWORK_PREFIX}}/%s/g' %s", podNumber, cs.Config.WANIPBase, cs.Config.VYOSScriptPath),
+				fmt.Sprintf("sed -i -e 's/{{THIRD_OCTET}}/%d/g;s/{{NETWORK_PREFIX}}/%s/g' %s", podNumber, config.WANIPBase, config.VYOSScriptPath),
 			},
 		}
 
@@ -114,7 +130,7 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 			RequestBody: reqBody,
 		}
 
-		_, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(execReq)
+		_, err := s.RequestHelper.MakeRequest(execReq)
 		if err != nil {
 			return fmt.Errorf("failed to make IP change request: %v", err)
 		}
@@ -126,9 +142,9 @@ func (cs *CloningService) configurePodRouter(podNumber int, node string, vmid in
 	return nil
 }
 
-func (cs *CloningService) SetPodVnet(poolName string, vnetName string) error {
+func (s *ProxmoxService) SetPodVnet(poolName string, vnetName string) error {
 	// Get all VMs in the pool
-	vms, err := cs.ProxmoxService.GetPoolVMs(poolName)
+	vms, err := s.GetPoolVMs(poolName)
 	if err != nil {
 		return fmt.Errorf("failed to get pool VMs for pool %s: %w", poolName, err)
 	}
@@ -164,7 +180,7 @@ func (cs *CloningService) SetPodVnet(poolName string, vnetName string) error {
 			RequestBody: reqBody,
 		}
 
-		_, err := cs.ProxmoxService.GetRequestHelper().MakeRequest(req)
+		_, err := s.RequestHelper.MakeRequest(req)
 		if err != nil {
 			errorMsg := fmt.Sprintf("failed to update network for VM %s (VMID: %d): %v", vm.Name, vm.VmId, err)
 			log.Printf("ERROR: %s", errorMsg)
@@ -180,4 +196,19 @@ func (cs *CloningService) SetPodVnet(poolName string, vnetName string) error {
 
 	log.Printf("Successfully configured VNet %s for all %d VMs in pool %s", vnetName, len(vms), poolName)
 	return nil
+}
+
+func (s *ProxmoxService) GetUsedVNets() ([]VNet, error) {
+	vnets := []VNet{}
+
+	req := tools.ProxmoxAPIRequest{
+		Method:   "GET",
+		Endpoint: "/cluster/sdn/vnets",
+	}
+
+	if err := s.RequestHelper.MakeRequestAndUnmarshal(req, &vnets); err != nil {
+		return nil, fmt.Errorf("failed to get vnets: %w", err)
+	}
+
+	return vnets, nil
 }

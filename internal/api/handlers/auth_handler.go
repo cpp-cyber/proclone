@@ -18,7 +18,18 @@ import (
 
 // NewAuthHandler creates a new authentication handler
 func NewAuthHandler() (*AuthHandler, error) {
-	authService, err := auth.NewAuthService()
+	proxmoxServiceInterface, err := proxmox.NewService()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create proxmox service: %w", err)
+	}
+
+	// Type assert to get concrete type for auth service
+	proxmoxService, ok := proxmoxServiceInterface.(*proxmox.ProxmoxService)
+	if !ok {
+		return nil, fmt.Errorf("failed to convert proxmox service to concrete type")
+	}
+
+	authService, err := auth.NewAuthService(proxmoxService)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create auth service: %w", err)
 	}
@@ -28,17 +39,12 @@ func NewAuthHandler() (*AuthHandler, error) {
 		return nil, fmt.Errorf("failed to create LDAP service: %w", err)
 	}
 
-	proxmoxService, err := proxmox.NewService()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create proxmox service: %w", err)
-	}
-
 	log.Println("Auth handler initialized")
 
 	return &AuthHandler{
 		authService:    authService,
 		ldapService:    ldapService,
-		proxmoxService: proxmoxService,
+		proxmoxService: proxmoxServiceInterface,
 	}, nil
 }
 
@@ -149,38 +155,6 @@ func (h *AuthHandler) RegisterHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
 }
 
-// =================================================
-// User Handlers
-// =================================================
-
-// ADMIN: GetUsersHandler returns a list of all users
-func (h *AuthHandler) GetUsersHandler(c *gin.Context) {
-	users, err := h.ldapService.GetUsers()
-	if err != nil {
-		log.Printf("Failed to retrieve users: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve users"})
-		return
-	}
-
-	var adminCount = 0
-	var disabledCount = 0
-	for _, user := range users {
-		if user.IsAdmin {
-			adminCount++
-		}
-		if !user.Enabled {
-			disabledCount++
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"users":          users,
-		"count":          len(users),
-		"disabled_count": disabledCount,
-		"admin_count":    adminCount,
-	})
-}
-
 // ADMIN: CreateUsersHandler creates new user(s)
 func (h *AuthHandler) CreateUsersHandler(c *gin.Context) {
 	var req AdminCreateUserRequest
@@ -243,236 +217,4 @@ func (h *AuthHandler) DeleteUsersHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Users deleted successfully"})
-}
-
-// ADMIN: EnableUsersHandler enables existing user(s)
-func (h *AuthHandler) EnableUsersHandler(c *gin.Context) {
-	var req UsersRequest
-	if !validateAndBind(c, &req) {
-		return
-	}
-
-	var errors []error
-
-	for _, username := range req.Usernames {
-		if err := h.ldapService.EnableUserAccount(username); err != nil {
-			errors = append(errors, fmt.Errorf("failed to enable user %s: %v", username, err))
-		}
-	}
-
-	if len(errors) > 0 {
-		log.Printf("Failed to enable users: %v", errors)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to enable users", "details": errors})
-		return
-	}
-
-	// Sync users to Proxmox
-	if err := h.proxmoxService.SyncUsers(); err != nil {
-		log.Printf("Failed to sync users with Proxmox: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync users with Proxmox", "details": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Users enabled successfully"})
-}
-
-// ADMIN: DisableUsersHandler disables existing user(s)
-func (h *AuthHandler) DisableUsersHandler(c *gin.Context) {
-	var req UsersRequest
-	if !validateAndBind(c, &req) {
-		return
-	}
-
-	var errors []error
-
-	for _, username := range req.Usernames {
-		if err := h.ldapService.DisableUserAccount(username); err != nil {
-			errors = append(errors, fmt.Errorf("failed to disable user %s: %v", username, err))
-		}
-	}
-
-	if len(errors) > 0 {
-		log.Printf("Failed to disable users: %v", errors)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to disable users", "details": errors})
-		return
-	}
-
-	// Sync users to Proxmox
-	if err := h.proxmoxService.SyncUsers(); err != nil {
-		log.Printf("Failed to sync users with Proxmox: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync users with Proxmox", "details": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Users disabled successfully"})
-}
-
-// =================================================
-// Group Handlers
-// =================================================
-
-// ADMIN: SetUserGroupsHandler sets the groups for an existing user
-func (h *AuthHandler) SetUserGroupsHandler(c *gin.Context) {
-	var req SetUserGroupsRequest
-	if !validateAndBind(c, &req) {
-		return
-	}
-
-	if err := h.ldapService.SetUserGroups(req.Username, req.Groups); err != nil {
-		log.Printf("Failed to set groups for user %s: %v", req.Username, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set user groups", "details": err.Error()})
-		return
-	}
-
-	// Sync groups to Proxmox
-	if err := h.proxmoxService.SyncGroups(); err != nil {
-		log.Printf("Failed to sync groups with Proxmox: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync groups with Proxmox", "details": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "User groups updated successfully"})
-}
-
-func (h *AuthHandler) GetGroupsHandler(c *gin.Context) {
-	groups, err := h.ldapService.GetGroups()
-	if err != nil {
-		log.Printf("Failed to retrieve groups: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve groups"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"groups": groups,
-		"count":  len(groups),
-	})
-}
-
-// ADMIN: CreateGroupsHandler creates new group(s)
-func (h *AuthHandler) CreateGroupsHandler(c *gin.Context) {
-	var req GroupsRequest
-	if !validateAndBind(c, &req) {
-		return
-	}
-
-	var errors []error
-
-	// Create groups in AD
-	for _, group := range req.Groups {
-		if err := h.ldapService.CreateGroup(group); err != nil {
-			errors = append(errors, fmt.Errorf("failed to create group %s: %v", group, err))
-		}
-	}
-
-	if len(errors) > 0 {
-		log.Printf("Failed to create groups: %v", errors)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create groups", "details": errors})
-		return
-	}
-
-	// Sync groups to Proxmox
-	if err := h.proxmoxService.SyncGroups(); err != nil {
-		log.Printf("Failed to sync groups with Proxmox: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync groups with Proxmox", "details": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{"message": "Groups created successfully"})
-}
-
-func (h *AuthHandler) RenameGroupHandler(c *gin.Context) {
-	var req RenameGroupRequest
-	if !validateAndBind(c, &req) {
-		return
-	}
-
-	if err := h.ldapService.RenameGroup(req.OldName, req.NewName); err != nil {
-		log.Printf("Failed to rename group %s to %s: %v", req.OldName, req.NewName, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to rename group", "details": err.Error()})
-		return
-	}
-
-	// Sync groups to Proxmox
-	if err := h.proxmoxService.SyncGroups(); err != nil {
-		log.Printf("Failed to sync groups with Proxmox: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync groups with Proxmox", "details": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Group renamed successfully"})
-}
-
-func (h *AuthHandler) DeleteGroupsHandler(c *gin.Context) {
-	var req GroupsRequest
-	if !validateAndBind(c, &req) {
-		return
-	}
-
-	var errors []error
-
-	// Delete groups in AD
-	for _, group := range req.Groups {
-		if err := h.ldapService.DeleteGroup(group); err != nil {
-			errors = append(errors, fmt.Errorf("failed to delete group %s: %v", group, err))
-		}
-	}
-
-	if len(errors) > 0 {
-		log.Printf("Failed to delete groups: %v", errors)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete groups", "details": errors})
-		return
-	}
-
-	// Sync groups to Proxmox
-	if err := h.proxmoxService.SyncGroups(); err != nil {
-		log.Printf("Failed to sync groups with Proxmox: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync groups with Proxmox", "details": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Groups deleted successfully"})
-}
-
-func (h *AuthHandler) AddUsersHandler(c *gin.Context) {
-	var req ModifyGroupMembersRequest
-	if !validateAndBind(c, &req) {
-		return
-	}
-
-	if err := h.ldapService.AddUsersToGroup(req.Group, req.Usernames); err != nil {
-		log.Printf("Failed to add users to group %s: %v", req.Group, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add users to group", "details": err.Error()})
-		return
-	}
-
-	// Sync groups to Proxmox
-	if err := h.proxmoxService.SyncGroups(); err != nil {
-		log.Printf("Failed to sync groups with Proxmox: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync groups with Proxmox", "details": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Users added to group successfully"})
-}
-
-func (h *AuthHandler) RemoveUsersHandler(c *gin.Context) {
-	var req ModifyGroupMembersRequest
-	if !validateAndBind(c, &req) {
-		return
-	}
-
-	if err := h.ldapService.RemoveUsersFromGroup(req.Group, req.Usernames); err != nil {
-		log.Printf("Failed to remove users from group %s: %v", req.Group, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove users from group", "details": err.Error()})
-		return
-	}
-
-	// Sync groups to Proxmox
-	if err := h.proxmoxService.SyncGroups(); err != nil {
-		log.Printf("Failed to sync groups with Proxmox: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync groups with Proxmox", "details": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Users removed from group successfully"})
 }

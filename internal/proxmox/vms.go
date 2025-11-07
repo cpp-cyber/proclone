@@ -22,6 +22,22 @@ func (s *ProxmoxService) GetVMs() ([]VirtualResource, error) {
 	return vms, nil
 }
 
+func (s *ProxmoxService) GetVMTemplates() ([]VirtualResource, error) {
+	vms, err := s.GetClusterResources("type=vm")
+	if err != nil {
+		return []VirtualResource{}, err
+	}
+
+	var templates []VirtualResource
+	for _, vm := range vms {
+		if vm.ResourcePool == s.Config.VMTemplatePool {
+			templates = append(templates, vm)
+		}
+	}
+
+	return templates, nil
+}
+
 func (s *ProxmoxService) StartVM(node string, vmID int) error {
 	return s.vmAction("start", node, vmID)
 }
@@ -140,10 +156,9 @@ func (s *ProxmoxService) WaitForDisk(node string, vmID int, maxWait time.Duratio
 		}
 
 		if configResp.HardDisk != "" {
-			//TODO/NOTE: Using static node "gonk" here because it seems to be the most reliable
 			pendingReq := tools.ProxmoxAPIRequest{
 				Method:   "GET",
-				Endpoint: fmt.Sprintf("/nodes/gonk/storage/%s/content?vmid=%d", s.Config.StorageID, vmID),
+				Endpoint: fmt.Sprintf("/nodes/%s/storage/%s/content?vmid=%d", s.Config.Nodes[0], s.Config.StorageID, vmID),
 			}
 
 			var diskResponse []PendingDiskResponse

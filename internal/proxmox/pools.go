@@ -249,3 +249,189 @@ func (s *ProxmoxService) GetNextPodIDs(minPodID int, maxPodID int, num int) ([]s
 
 	return podIDs, adjustedIDs, nil
 }
+
+func (s *ProxmoxService) CreateTemplatePool(creator string, name string, addRouter bool, vms []VM) error {
+	// 1. Create pool in proxmox with specific name and "kamino_template_" prefix
+	poolName := fmt.Sprintf("kamino_template_%s", name)
+	if err := s.CreateNewPool(poolName); err != nil {
+		return err
+	}
+
+	if err := s.SetPoolPermission(poolName, creator, false); err != nil {
+		return err
+	}
+
+	if addRouter == false && len(vms) == 0 {
+		return nil
+	}
+
+	// 2. Get VMIDs
+	numVMs := len(vms)
+	if addRouter {
+		numVMs++
+	}
+
+	vmIDs, err := s.GetNextVMIDs(numVMs)
+	if err != nil {
+		return err
+	}
+
+	// 3. Find best node to clone to
+	bestNode, err := s.FindBestNode()
+	if err != nil {
+		return err
+	}
+
+	// 4. If addRouter is true, clone router from Config
+	var router VM
+	var routerCloneReq VMCloneRequest
+	var routerVMID int
+
+	if addRouter {
+		router = VM{
+			Name: s.Config.RouterName,
+			Node: s.Config.RouterNode,
+			VMID: s.Config.RouterVMID,
+		}
+
+		// Save router VMID before removing it from the list
+		routerVMID = vmIDs[0]
+
+		routerCloneReq = VMCloneRequest{
+			SourceVM:   router,
+			PoolName:   poolName,
+			NewVMID:    routerVMID,
+			TargetNode: bestNode,
+		}
+
+		// Remove the first VMID from the list
+		vmIDs = vmIDs[1:]
+
+		if err := s.CloneVM(routerCloneReq); err != nil {
+			return err
+		}
+	}
+
+	// 5. Clone specified templates to newly created pool with the specified names
+	for i, vm := range vms {
+		vmCloneReq := VMCloneRequest{
+			SourceVM:   vm,
+			PoolName:   poolName,
+			NewVMID:    vmIDs[i],
+			TargetNode: bestNode,
+		}
+
+		if err := s.CloneVM(vmCloneReq); err != nil {
+			return err
+		}
+	}
+
+	// Return with no error if addRouter is false since all other operations below have to do with routing
+	if !addRouter {
+		return nil
+	}
+
+	// 8. Wait for all VM clone operations to complete before configuring VNets
+	log.Printf("Waiting for VMs in pool %s to be available", poolName)
+	time.Sleep(2 * time.Second)
+
+	// First wait for all VMs to appear in the pool
+	for retries := range 30 {
+		poolVMs, err := s.GetPoolVMs(poolName)
+		if err != nil {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		if len(poolVMs) >= numVMs {
+			log.Printf("Pool %s has %d VMs (expected %d) - all VMs present", poolName, len(poolVMs), numVMs)
+			break
+		}
+
+		log.Printf("Pool %s has %d VMs, waiting for %d (retry %d/30)", poolName, len(poolVMs), numVMs, retries+1)
+		time.Sleep(2 * time.Second)
+	}
+
+	// Wait for all VM locks to be released
+	log.Printf("Waiting for all VM clone operations to complete (checking locks)")
+	poolVMs, err := s.GetPoolVMs(poolName)
+	if err != nil {
+		return fmt.Errorf("failed to get pool VMs after waiting: %w", err)
+	}
+
+	for _, vm := range poolVMs {
+		log.Printf("Waiting for VM %d (%s) lock to be released", vm.VmId, vm.Name)
+		if err := s.WaitForLock(vm.NodeName, vm.VmId); err != nil {
+			log.Printf("Warning: timeout waiting for VM %d lock, continuing anyway: %v", vm.VmId, err)
+		}
+	}
+
+	log.Printf("All clone operations complete for pool %s", poolName)
+
+	// 9. Configure VNet for all VMs
+	// Get number of template pools
+	templatePools, err := s.GetTemplatePools()
+	if err != nil {
+		return fmt.Errorf("failed to get template pools: %w", err)
+	}
+
+	// Calculate the template ID to get the VNet name
+	templateID := len(templatePools) % 10
+	vnet := fmt.Sprintf("templ%d", templateID)
+
+	log.Printf("Configuring VNet %s for pool %s", vnet, poolName)
+	err = s.SetPodVnet(poolName, vnet)
+	if err != nil {
+		return fmt.Errorf("failed to set VNet for pool %s: %w", poolName, err)
+	}
+
+	// 10. Start router and wait for it to be available
+	if addRouter {
+		log.Printf("Starting router VM (VMID: %d) on node %s", routerVMID, bestNode)
+
+		// Wait for router disk to be available
+		log.Printf("Waiting for router disk to be available")
+		err = s.WaitForDisk(bestNode, routerVMID, 2*time.Minute)
+		if err != nil {
+			return fmt.Errorf("router disk unavailable: %w", err)
+		}
+
+		// Start the router
+		log.Printf("Starting router VM")
+		err = s.StartVM(bestNode, routerVMID)
+		if err != nil {
+			return fmt.Errorf("failed to start router VM: %w", err)
+		}
+
+		// Wait for router to be running
+		log.Printf("Waiting for router VM to be running")
+		err = s.WaitForRunning(bestNode, routerVMID)
+		if err != nil {
+			return fmt.Errorf("router VM failed to start: %w", err)
+		}
+
+		log.Printf("Router VM is now running")
+	}
+
+	// 11. Run config scripts on router
+	// Determine router type
+	routerType, err := s.GetRouterType(router)
+	if err != nil {
+		return fmt.Errorf("failed to get router type: %v", err)
+	}
+
+	// Calculate the third octect
+	octect := 254 - templateID
+
+	err = s.ConfigurePodRouter(octect, bestNode, router.VMID, routerType)
+	if err != nil {
+		return fmt.Errorf("failed to configure router for %s: %v", routerType, err)
+	}
+
+	log.Printf("Successfully created template pool %s with %d VMs", poolName, len(vms))
+	if addRouter {
+		log.Printf("Router VM included and started")
+	}
+
+	return nil
+}

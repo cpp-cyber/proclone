@@ -13,18 +13,14 @@ import (
 
 // Config holds the configuration for cloning operations
 type Config struct {
-	RouterName        string        `envconfig:"ROUTER_NAME" default:"1-1NAT-vyos"`
-	RouterVMID        int           `envconfig:"ROUTER_VMID"`
-	RouterNode        string        `envconfig:"ROUTER_NODE"`
+	RouterName        string        `envconfig:"PROXMOX_ROUTER_NAME" default:"1-1NAT-vyos"`
+	RouterVMID        int           `envconfig:"PROXMOX_ROUTER_VMID"`
+	RouterNode        string        `envconfig:"PROXMOX_ROUTER_NODE"`
 	MinPodID          int           `envconfig:"MIN_POD_ID" default:"1001"`
 	MaxPodID          int           `envconfig:"MAX_POD_ID" default:"1250"`
 	CloneTimeout      time.Duration `envconfig:"CLONE_TIMEOUT" default:"3m"`
-	RouterWaitTimeout time.Duration `envconfig:"ROUTER_WAIT_TIMEOUT" default:"120s"`
 	SDNApplyTimeout   time.Duration `envconfig:"SDN_APPLY_TIMEOUT" default:"30s"`
-	WANScriptPath     string        `envconfig:"WAN_SCRIPT_PATH" default:"/home/update-wan-ip.sh"`
-	VIPScriptPath     string        `envconfig:"VIP_SCRIPT_PATH" default:"/home/update-wan-vip.sh"`
-	VYOSScriptPath    string        `envconfig:"VYOS_SCRIPT_PATH" default:"/config/scripts/vyos-postconfig-bootup.script"`
-	WANIPBase         string        `envconfig:"WAN_IP_BASE" default:"172.16."`
+	RouterWaitTimeout time.Duration `envconfig:"ROUTER_WAIT_TIMEOUT" default:"120s"`
 }
 
 // KaminoTemplate represents a template in the system
@@ -95,7 +91,7 @@ type PodResponse struct {
 type Pod struct {
 	Name     string                    `json:"name"`
 	VMs      []proxmox.VirtualResource `json:"vms"`
-	Template KaminoTemplate            `json:"template,omitempty"`
+	Template KaminoTemplate            `json:"template"`
 }
 
 var allowedMIMEs = map[string]struct{}{
