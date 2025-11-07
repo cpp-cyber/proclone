@@ -415,15 +415,19 @@ func (s *ProxmoxService) CreateTemplatePool(creator string, name string, addRout
 
 	// 11. Run config scripts on router
 	// Determine router type
+	log.Printf("Determining router type")
 	routerType, err := s.GetRouterType(router)
 	if err != nil {
 		return fmt.Errorf("failed to get router type: %v", err)
 	}
+	log.Printf("Router type is %s", routerType)
 
 	// Calculate the third octect
 	octect := 254 - templateID
+	log.Printf("Third octect is %d", octect)
 
-	err = s.ConfigurePodRouter(octect, bestNode, router.VMID, routerType)
+	log.Printf("Configuring router")
+	err = s.ConfigurePodRouter(octect, bestNode, routerVMID, routerType)
 	if err != nil {
 		return fmt.Errorf("failed to configure router for %s: %v", routerType, err)
 	}

@@ -43,11 +43,10 @@ func (s *ProxmoxService) GetRouterType(router VM) (string, error) {
 // ConfigurePodRouter configures the pod router with proper networking settings
 func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int, routerType string) error {
 	config := RouterConfig{
-		RouterWaitTimeout: s.Config.RouterWaitTimeout,
-		WANScriptPath:     s.Config.WANScriptPath,
-		VIPScriptPath:     s.Config.VIPScriptPath,
-		VYOSScriptPath:    s.Config.VYOSScriptPath,
-		WANIPBase:         s.Config.WANIPBase,
+		WANScriptPath:  s.Config.WANScriptPath,
+		VIPScriptPath:  s.Config.VIPScriptPath,
+		VYOSScriptPath: s.Config.VYOSScriptPath,
+		WANIPBase:      s.Config.WANIPBase,
 	}
 
 	// Wait for router agent to be pingable
