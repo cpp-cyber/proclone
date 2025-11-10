@@ -65,8 +65,7 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 			return fmt.Errorf("router qemu agent timed out")
 		}
 
-		_, err := s.RequestHelper.MakeRequest(statusReq)
-		if err == nil {
+		if _, err := s.RequestHelper.MakeRequest(statusReq); err == nil {
 			break // Agent is responding
 		}
 

@@ -253,15 +253,18 @@ func (s *ProxmoxService) GetNextPodIDs(minPodID int, maxPodID int, num int) ([]s
 func (s *ProxmoxService) CreateTemplatePool(creator string, name string, addRouter bool, vms []VM) error {
 	// 1. Create pool in proxmox with specific name and "kamino_template_" prefix
 	poolName := fmt.Sprintf("kamino_template_%s", name)
+	log.Printf("Creating template pool %s", poolName)
 	if err := s.CreateNewPool(poolName); err != nil {
 		return err
 	}
 
+	log.Printf("Setting pool permissions for %s", poolName)
 	if err := s.SetPoolPermission(poolName, creator, false); err != nil {
 		return err
 	}
 
 	if addRouter == false && len(vms) == 0 {
+		log.Printf("No VMs to clone")
 		return nil
 	}
 
@@ -282,12 +285,16 @@ func (s *ProxmoxService) CreateTemplatePool(creator string, name string, addRout
 		return err
 	}
 
+	// Track cloning UPIDs directly in a map for O(1) lookup
+	pendingUPIDs := make(map[string]bool)
+
 	// 4. If addRouter is true, clone router from Config
 	var router VM
 	var routerCloneReq VMCloneRequest
 	var routerVMID int
 
 	if addRouter {
+		log.Printf("Cloning router VM")
 		router = VM{
 			Name: s.Config.RouterName,
 			Node: s.Config.RouterNode,
@@ -307,13 +314,16 @@ func (s *ProxmoxService) CreateTemplatePool(creator string, name string, addRout
 		// Remove the first VMID from the list
 		vmIDs = vmIDs[1:]
 
-		if err := s.CloneVM(routerCloneReq); err != nil {
+		upid, err := s.cloneVMWithUPID(routerCloneReq)
+		if err != nil {
 			return err
 		}
+		pendingUPIDs[upid] = true
 	}
 
 	// 5. Clone specified templates to newly created pool with the specified names
 	for i, vm := range vms {
+		log.Printf("Cloning VM %s", vm.Name)
 		vmCloneReq := VMCloneRequest{
 			SourceVM:   vm,
 			PoolName:   poolName,
@@ -321,54 +331,64 @@ func (s *ProxmoxService) CreateTemplatePool(creator string, name string, addRout
 			TargetNode: bestNode,
 		}
 
-		if err := s.CloneVM(vmCloneReq); err != nil {
+		upid, err := s.cloneVMWithUPID(vmCloneReq)
+		if err != nil {
 			return err
 		}
+		pendingUPIDs[upid] = true
+	}
+
+	if len(pendingUPIDs) == 0 {
+		log.Printf("No VM clone operations to complete")
+		return nil
+	}
+
+	log.Printf("Waiting for %d VM clone operation(s) to complete", len(pendingUPIDs))
+	for retries := range 20 {
+		activeTasks, err := s.getActiveCloningTasks(bestNode)
+		if err != nil {
+			return fmt.Errorf("failed to get active tasks: %w", err)
+		}
+
+		// Build set of currently active UPIDs
+		activeUPIDs := make(map[string]bool)
+		for _, task := range activeTasks {
+			activeUPIDs[task.UPID] = true
+		}
+
+		// Check if any of our clone operations are still running
+		stillRunning := false
+		for upid := range pendingUPIDs {
+			if activeUPIDs[upid] {
+				stillRunning = true
+				break
+			}
+		}
+
+		if !stillRunning {
+			log.Printf("All VM clone operations completed")
+			break
+		}
+
+		if retries == 19 {
+			return fmt.Errorf("timed out waiting for VM clone operations to complete")
+		}
+
+		log.Printf("Waiting for %d VM clone operation(s) to complete (retry %d/30)", len(pendingUPIDs), retries+1)
+		time.Sleep(5 * time.Second)
 	}
 
 	// Return with no error if addRouter is false since all other operations below have to do with routing
 	if !addRouter {
+		log.Printf("No router VM to configure")
 		return nil
 	}
 
-	// 8. Wait for all VM clone operations to complete before configuring VNets
-	log.Printf("Waiting for VMs in pool %s to be available", poolName)
-	time.Sleep(2 * time.Second)
+	// Additional sleep call after all VM clone operations are completed just in case
+	log.Printf("Sleeping for 10 seconds after VM clone operations")
+	time.Sleep(10 * time.Second)
 
-	// First wait for all VMs to appear in the pool
-	for retries := range 30 {
-		poolVMs, err := s.GetPoolVMs(poolName)
-		if err != nil {
-			time.Sleep(2 * time.Second)
-			continue
-		}
-
-		if len(poolVMs) >= numVMs {
-			log.Printf("Pool %s has %d VMs (expected %d) - all VMs present", poolName, len(poolVMs), numVMs)
-			break
-		}
-
-		log.Printf("Pool %s has %d VMs, waiting for %d (retry %d/30)", poolName, len(poolVMs), numVMs, retries+1)
-		time.Sleep(2 * time.Second)
-	}
-
-	// Wait for all VM locks to be released
-	log.Printf("Waiting for all VM clone operations to complete (checking locks)")
-	poolVMs, err := s.GetPoolVMs(poolName)
-	if err != nil {
-		return fmt.Errorf("failed to get pool VMs after waiting: %w", err)
-	}
-
-	for _, vm := range poolVMs {
-		log.Printf("Waiting for VM %d (%s) lock to be released", vm.VmId, vm.Name)
-		if err := s.WaitForLock(vm.NodeName, vm.VmId); err != nil {
-			log.Printf("Warning: timeout waiting for VM %d lock, continuing anyway: %v", vm.VmId, err)
-		}
-	}
-
-	log.Printf("All clone operations complete for pool %s", poolName)
-
-	// 9. Configure VNet for all VMs
+	// 6. Configure VNet for all VMs
 	// Get number of template pools
 	templatePools, err := s.GetTemplatePools()
 	if err != nil {
@@ -385,35 +405,28 @@ func (s *ProxmoxService) CreateTemplatePool(creator string, name string, addRout
 		return fmt.Errorf("failed to set VNet for pool %s: %w", poolName, err)
 	}
 
-	// 10. Start router and wait for it to be available
-	if addRouter {
-		log.Printf("Starting router VM (VMID: %d) on node %s", routerVMID, bestNode)
+	// 7. Start router and wait for it to be available
+	log.Printf("Starting router VM (VMID: %d) on node %s", routerVMID, bestNode)
 
-		// Wait for router disk to be available
-		log.Printf("Waiting for router disk to be available")
-		err = s.WaitForDisk(bestNode, routerVMID, 2*time.Minute)
-		if err != nil {
-			return fmt.Errorf("router disk unavailable: %w", err)
-		}
-
-		// Start the router
-		log.Printf("Starting router VM")
-		err = s.StartVM(bestNode, routerVMID)
-		if err != nil {
-			return fmt.Errorf("failed to start router VM: %w", err)
-		}
-
-		// Wait for router to be running
-		log.Printf("Waiting for router VM to be running")
-		err = s.WaitForRunning(bestNode, routerVMID)
-		if err != nil {
-			return fmt.Errorf("router VM failed to start: %w", err)
-		}
-
-		log.Printf("Router VM is now running")
+	// Start the router
+	log.Printf("Starting router VM")
+	err = s.StartVM(bestNode, routerVMID)
+	if err != nil {
+		return fmt.Errorf("failed to start router VM: %w", err)
 	}
 
-	// 11. Run config scripts on router
+	// Wait for router to be running
+	log.Printf("Waiting for router VM to be running")
+	err = s.WaitForRunning(bestNode, routerVMID)
+	if err != nil {
+		return fmt.Errorf("router VM failed to start: %w", err)
+	}
+
+	// Additional sleep call after router starts just in case
+	log.Printf("Router VM is now running, sleeping for 10 seconds")
+	time.Sleep(10 * time.Second)
+
+	// 8. Run config scripts on router
 	// Determine router type
 	log.Printf("Determining router type")
 	routerType, err := s.GetRouterType(router)

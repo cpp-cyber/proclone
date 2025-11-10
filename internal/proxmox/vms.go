@@ -144,6 +144,30 @@ func (s *ProxmoxService) CloneVM(req VMCloneRequest) error {
 	return nil
 }
 
+func (s *ProxmoxService) cloneVMWithUPID(req VMCloneRequest) (string, error) {
+	// Clone VM
+	cloneBody := map[string]any{
+		"newid":  req.NewVMID,
+		"name":   req.SourceVM.Name,
+		"pool":   req.PoolName,
+		"full":   req.Full,
+		"target": req.TargetNode,
+	}
+
+	cloneReq := tools.ProxmoxAPIRequest{
+		Method:      "POST",
+		Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/clone", req.SourceVM.Node, req.SourceVM.VMID),
+		RequestBody: cloneBody,
+	}
+
+	var upid string
+	if err := s.RequestHelper.MakeRequestAndUnmarshal(cloneReq, &upid); err != nil {
+		return "", fmt.Errorf("failed to initiate VM clone: %w", err)
+	}
+
+	return upid, nil
+}
+
 func (s *ProxmoxService) WaitForDisk(node string, vmID int, maxWait time.Duration) error {
 	start := time.Now()
 

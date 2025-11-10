@@ -61,6 +61,7 @@ type Service interface {
 	WaitForLock(node string, vmID int) error
 	WaitForRunning(node string, vmID int) error
 	WaitForStopped(node string, vmID int) error
+	UPIDTest() error
 
 	// Pool Management
 	GetPoolVMs(poolName string) ([]VirtualResource, error)
@@ -236,4 +237,18 @@ type User struct {
 type VNet struct {
 	Name string `json:"vnet"`
 	Tag  int    `json:"tag"`
+}
+
+type Task struct {
+	ID         string `json:"id"`
+	Node       string `json:"node"`
+	PID        int    `json:"pid"`
+	PStart     int    `json:"pstart"`
+	StartTime  int64  `json:"starttime"`
+	Type       string `json:"type"`
+	UPID       string `json:"upid"`
+	User       string `json:"user"`
+	EndTime    int64  `json:"endtime"`
+	Status     string `json:"status"`
+	ExitStatus string `json:"exitstatus"`
 }
