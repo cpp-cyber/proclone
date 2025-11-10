@@ -61,7 +61,6 @@ type Service interface {
 	WaitForLock(node string, vmID int) error
 	WaitForRunning(node string, vmID int) error
 	WaitForStopped(node string, vmID int) error
-	UPIDTest() error
 
 	// Pool Management
 	GetPoolVMs(poolName string) ([]VirtualResource, error)
