@@ -13,6 +13,7 @@ type Service interface {
 	// Authentication
 	Authenticate(username, password string) (bool, error)
 	IsAdmin(username string) (bool, error)
+	IsCreator(username string) (bool, error)
 
 	// Health and Connection
 	HealthCheck() error

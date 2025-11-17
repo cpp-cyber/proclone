@@ -18,7 +18,8 @@ type ProxmoxConfig struct {
 	Realm             string        `envconfig:"PROXMOX_REALM"`
 	NodesStr          string        `envconfig:"PROXMOX_NODES"`
 	StorageID         string        `envconfig:"PROXMOX_STORAGE_ID" default:"local-lvm"`
-	AdminGroupName    string        `envconfig:"PROXMOX_ADMIN_GROUP_NAME" default:"admin"`
+	AdminGroupName    string        `envconfig:"PROXMOX_ADMIN_GROUP_NAME" default:"Admin"`
+	CreatorGroupName  string        `envconfig:"PROXMOX_CREATOR_GROUP_NAME" default:"Creator"`
 	VMTemplatePool    string        `envconfig:"PROXMOX_VM_TEMPLATE_POOL" default:"Templates"`
 	RouterName        string        `envconfig:"PROXMOX_ROUTER_NAME" default:"1-1NAT-vyos"`
 	RouterNode        string        `envconfig:"PROXMOX_ROUTER_NODE"`

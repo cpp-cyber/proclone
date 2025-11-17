@@ -150,8 +150,8 @@ func extractDomainFromDN(dn string) string {
 
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, "dc=") {
-			domainParts = append(domainParts, strings.TrimPrefix(part, "dc="))
+		if domain, found := strings.CutPrefix(part, "dc="); found {
+			domainParts = append(domainParts, domain)
 		}
 	}
 

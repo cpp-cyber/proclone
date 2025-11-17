@@ -5,39 +5,38 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// registerAdminRoutes defines all routes accessible to admin users
+// registerAdminRoutes defines all routes accessible ONLY to admin users
+// Template operations have been moved to creator routes (accessible by both admins and creators)
 func registerAdminRoutes(g *gin.RouterGroup, authHandler *handlers.AuthHandler, proxmoxHandler *handlers.ProxmoxHandler, cloningHandler *handlers.CloningHandler, dashboardHandler *handlers.DashboardHandler) {
-	// GET Requests
+	// Admin dashboard and cluster management
 	g.GET("/dashboard", dashboardHandler.GetAdminDashboardStatsHandler)
 	g.GET("/cluster", proxmoxHandler.GetClusterResourceUsageHandler)
-	g.GET("/users", proxmoxHandler.GetUsersHandler)
-	g.GET("/groups", proxmoxHandler.GetGroupsHandler)
-	g.GET("/vms", proxmoxHandler.GetVMsHandler)
 	g.GET("/vnets", proxmoxHandler.GetUsedVNetsHandler)
+	g.GET("/vms", proxmoxHandler.GetVMsHandler)
 	g.GET("/pods", cloningHandler.AdminGetPodsHandler)
-	g.GET("/templates", cloningHandler.AdminGetTemplatesHandler)
-	g.GET("/templates/unpublished", cloningHandler.GetUnpublishedTemplatesHandler)
-	g.GET("/templates/vms", proxmoxHandler.GetVMTemplatesHandler)
-	g.GET("/templates/proxmox", proxmoxHandler.GetProxmoxTemplatePoolsHandler)
 
-	// POST Requests
+	// User management (admin only)
+	g.GET("/users", proxmoxHandler.GetUsersHandler)
 	g.POST("/users/create", authHandler.CreateUsersHandler)
 	g.POST("/users/delete", authHandler.DeleteUsersHandler)
 	g.POST("/user/groups", proxmoxHandler.SetUserGroupsHandler)
+
+	// Group management (admin only)
+	g.GET("/groups", proxmoxHandler.GetGroupsHandler)
 	g.POST("/groups/create", proxmoxHandler.CreateGroupsHandler)
 	g.POST("/group/members/add", proxmoxHandler.AddUsersHandler)
 	g.POST("/group/members/remove", proxmoxHandler.RemoveUsersHandler)
 	g.POST("/group/edit", proxmoxHandler.EditGroupHandler)
 	g.POST("/groups/delete", proxmoxHandler.DeleteGroupsHandler)
+
+	// VM management (admin only)
 	g.POST("/vm/start", proxmoxHandler.StartVMHandler)
 	g.POST("/vm/shutdown", proxmoxHandler.ShutdownVMHandler)
 	g.POST("/vm/reboot", proxmoxHandler.RebootVMHandler)
+
+	// Pod management (admin only)
 	g.POST("/pods/delete", cloningHandler.AdminDeletePodHandler)
-	g.POST("/template/publish", cloningHandler.PublishTemplateHandler)
-	g.POST("/template/create", proxmoxHandler.CreateTemplateHandler)
-	g.POST("/template/edit", cloningHandler.EditTemplateHandler)
-	g.POST("/template/delete", cloningHandler.DeleteTemplateHandler)
-	g.POST("/template/visibility", cloningHandler.ToggleTemplateVisibilityHandler)
-	g.POST("/template/image/upload", cloningHandler.UploadTemplateImageHandler)
+
+	// Bulk template deployment (admin only)
 	g.POST("/templates/clone", cloningHandler.AdminCloneTemplateHandler)
 }

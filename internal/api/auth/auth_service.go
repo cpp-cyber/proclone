@@ -70,6 +70,24 @@ func (s *AuthService) IsAdmin(username string) (bool, error) {
 	return false, nil
 }
 
+func (s *AuthService) IsCreator(username string) (bool, error) {
+	// Get user's groups from Proxmox
+	userGroups, err := s.proxmoxService.GetUserGroups(username)
+	if err != nil {
+		return false, fmt.Errorf("failed to get user groups: %w", err)
+	}
+
+	// Get the creator group name from config
+	creatorGroupName := s.proxmoxService.Config.CreatorGroupName
+
+	// Check if user is in the creator group
+	if slices.Contains(userGroups, creatorGroupName) {
+		return true, nil
+	}
+
+	return false, nil
+}
+
 func (s *AuthService) HealthCheck() error {
 	return s.ldapService.HealthCheck()
 }

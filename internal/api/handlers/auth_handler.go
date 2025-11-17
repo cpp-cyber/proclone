@@ -48,6 +48,11 @@ func NewAuthHandler() (*AuthHandler, error) {
 	}, nil
 }
 
+// GetAuthService returns the auth service for use in middleware
+func (h *AuthHandler) GetAuthService() auth.Service {
+	return h.authService
+}
+
 // LoginHandler handles the login POST request
 func (h *AuthHandler) LoginHandler(c *gin.Context) {
 	var req UsernamePasswordRequest
@@ -80,6 +85,14 @@ func (h *AuthHandler) LoginHandler(c *gin.Context) {
 	}
 	session.Set("isAdmin", isAdmin)
 
+	// Check if user is creator
+	isCreator, err := h.authService.IsCreator(req.Username)
+	if err != nil {
+		log.Printf("Error checking creator status for user %s: %v", req.Username, err)
+		isCreator = false
+	}
+	session.Set("isCreator", isCreator)
+
 	if err := session.Save(); err != nil {
 		log.Printf("Failed to save session for user %s: %v", req.Username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save session"})
@@ -87,8 +100,9 @@ func (h *AuthHandler) LoginHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Login successful",
-		"isAdmin": isAdmin,
+		"message":   "Login successful",
+		"isAdmin":   isAdmin,
+		"isCreator": isCreator,
 	})
 }
 
@@ -113,17 +127,24 @@ func (h *AuthHandler) SessionHandler(c *gin.Context) {
 	// Since this is under private routes, AuthRequired middleware ensures session exists
 	id := session.Get("id")
 	isAdmin := session.Get("isAdmin")
+	isCreator := session.Get("isCreator")
 
-	// Convert isAdmin to bool, defaulting to false if not set
+	// Convert to bool, defaulting to false if not set
 	adminStatus := false
 	if isAdmin != nil {
 		adminStatus = isAdmin.(bool)
+	}
+
+	creatorStatus := false
+	if isCreator != nil {
+		creatorStatus = isCreator.(bool)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"authenticated": true,
 		"username":      id.(string),
 		"isAdmin":       adminStatus,
+		"isCreator":     creatorStatus,
 	})
 }
 
