@@ -194,7 +194,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 			errors = append(errors, fmt.Sprintf("failed to clone router VM for %s: %v", target.Name, err))
 		} else {
 			// Determine router type
-			routerType, err := cs.getRouterType(*router)
+			routerType, err := cs.ProxmoxService.GetRouterType(*router)
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("failed to get router type for %s: %v", target.Name, err))
 			}
@@ -232,7 +232,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		log.Printf("Waiting for VMs in pool %s to be available", target.PoolName)
 		time.Sleep(2 * time.Second)
 
-		// Check if pool has the expected number of VMs
+		// First wait for all VMs to appear in the pool
 		for retries := range 30 {
 			poolVMs, err := cs.ProxmoxService.GetPoolVMs(target.PoolName)
 			if err != nil {
@@ -241,13 +241,30 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 			}
 
 			if len(poolVMs) >= numVMsPerTarget {
-				log.Printf("Pool %s has %d VMs (expected %d) - clone operations complete", target.PoolName, len(poolVMs), numVMsPerTarget)
+				log.Printf("Pool %s has %d VMs (expected %d) - all VMs present", target.PoolName, len(poolVMs), numVMsPerTarget)
 				break
 			}
 
 			log.Printf("Pool %s has %d VMs, waiting for %d (retry %d/30)", target.PoolName, len(poolVMs), numVMsPerTarget, retries+1)
 			time.Sleep(2 * time.Second)
 		}
+
+		// Wait for all VM locks to be released
+		log.Printf("Waiting for all VM clone operations to complete for pool %s (checking locks)", target.PoolName)
+		poolVMs, err := cs.ProxmoxService.GetPoolVMs(target.PoolName)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("failed to get pool VMs after waiting for %s: %v", target.Name, err))
+			continue
+		}
+
+		for _, vm := range poolVMs {
+			log.Printf("Waiting for VM %d (%s) lock to be released", vm.VmId, vm.Name)
+			if err := cs.ProxmoxService.WaitForLock(vm.NodeName, vm.VmId); err != nil {
+				log.Printf("Warning: timeout waiting for VM %d lock, continuing anyway: %v", vm.VmId, err)
+			}
+		}
+
+		log.Printf("All clone operations complete for pool %s", target.PoolName)
 	}
 
 	// Release the vmid allocation mutex now that all of the VMs are cloned on proxmox
@@ -258,7 +275,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	for _, target := range req.Targets {
 		vnetName := fmt.Sprintf("kamino%d", target.PodNumber)
 		log.Printf("Setting VNet %s for pool %s (target: %s)", vnetName, target.PoolName, target.Name)
-		err = cs.SetPodVnet(target.PoolName, vnetName)
+		err = cs.ProxmoxService.SetPodVnet(target.PoolName, vnetName)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to update pod vnet for %s: %v", target.Name, err))
 		}
@@ -315,7 +332,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		}
 
 		log.Printf("Configuring pod router for %s (Pod: %d, VMID: %d)", routerInfo.TargetName, routerInfo.PodNumber, routerInfo.VMID)
-		err = cs.configurePodRouter(routerInfo.PodNumber, routerInfo.Node, routerInfo.VMID, routerInfo.RouterType)
+		err = cs.ProxmoxService.ConfigurePodRouter(routerInfo.PodNumber, routerInfo.Node, routerInfo.VMID, routerInfo.RouterType)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to configure pod router for %s: %v", routerInfo.TargetName, err))
 		}

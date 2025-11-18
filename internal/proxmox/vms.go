@@ -22,6 +22,22 @@ func (s *ProxmoxService) GetVMs() ([]VirtualResource, error) {
 	return vms, nil
 }
 
+func (s *ProxmoxService) GetVMTemplates() ([]VirtualResource, error) {
+	vms, err := s.GetClusterResources("type=vm")
+	if err != nil {
+		return []VirtualResource{}, err
+	}
+
+	var templates []VirtualResource
+	for _, vm := range vms {
+		if vm.ResourcePool == s.Config.VMTemplatePool {
+			templates = append(templates, vm)
+		}
+	}
+
+	return templates, nil
+}
+
 func (s *ProxmoxService) StartVM(node string, vmID int) error {
 	return s.vmAction("start", node, vmID)
 }
@@ -128,6 +144,30 @@ func (s *ProxmoxService) CloneVM(req VMCloneRequest) error {
 	return nil
 }
 
+func (s *ProxmoxService) cloneVMWithUPID(req VMCloneRequest) (string, error) {
+	// Clone VM
+	cloneBody := map[string]any{
+		"newid":  req.NewVMID,
+		"name":   req.SourceVM.Name,
+		"pool":   req.PoolName,
+		"full":   req.Full,
+		"target": req.TargetNode,
+	}
+
+	cloneReq := tools.ProxmoxAPIRequest{
+		Method:      "POST",
+		Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/clone", req.SourceVM.Node, req.SourceVM.VMID),
+		RequestBody: cloneBody,
+	}
+
+	var upid string
+	if err := s.RequestHelper.MakeRequestAndUnmarshal(cloneReq, &upid); err != nil {
+		return "", fmt.Errorf("failed to initiate VM clone: %w", err)
+	}
+
+	return upid, nil
+}
+
 func (s *ProxmoxService) WaitForDisk(node string, vmID int, maxWait time.Duration) error {
 	start := time.Now()
 
@@ -139,12 +179,17 @@ func (s *ProxmoxService) WaitForDisk(node string, vmID int, maxWait time.Duratio
 			continue
 		}
 
+		log.Printf("%+v", configResp)
+
 		if configResp.HardDisk != "" {
-			//TODO/NOTE: Using static node "gonk" here because it seems to be the most reliable
+			log.Printf("/nodes/%s/storage/%s/content?vmid=%d", s.Config.Nodes[0], s.Config.StorageID, vmID)
+
 			pendingReq := tools.ProxmoxAPIRequest{
 				Method:   "GET",
-				Endpoint: fmt.Sprintf("/nodes/gonk/storage/%s/content?vmid=%d", s.Config.StorageID, vmID),
+				Endpoint: fmt.Sprintf("/nodes/%s/storage/%s/content?vmid=%d", s.Config.Nodes[0], s.Config.StorageID, vmID),
 			}
+
+			log.Printf("%+v", pendingReq)
 
 			var diskResponse []PendingDiskResponse
 			err := s.RequestHelper.MakeRequestAndUnmarshal(pendingReq, &diskResponse)
@@ -153,10 +198,12 @@ func (s *ProxmoxService) WaitForDisk(node string, vmID int, maxWait time.Duratio
 				continue
 			}
 
+			log.Printf("%+v", diskResponse)
+
 			// Iterate through all disks, if all have valid Used and Size (not 0) consider available
 			allAvailable := true
 			for _, disk := range diskResponse {
-				if disk.Used == 0 || disk.Size == 0 {
+				if disk.Size == 0 {
 					allAvailable = false
 					break
 				}

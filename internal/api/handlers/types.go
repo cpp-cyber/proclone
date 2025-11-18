@@ -103,9 +103,9 @@ type SetUserGroupsRequest struct {
 	Groups   []string `json:"groups" binding:"required,min=1,dive,min=1,max=100" validate:"dive,alphanum,ascii"`
 }
 
-type RenameGroupRequest struct {
-	OldName string `json:"old_name" binding:"required,min=1,max=100" validate:"alphanum,ascii"`
-	NewName string `json:"new_name" binding:"required,min=1,max=100" validate:"alphanum,ascii"`
+type EditGroupRequest struct {
+	Group   string `json:"group"`
+	Comment string `json:"comment"`
 }
 
 type DashboardStats struct {
@@ -115,6 +115,12 @@ type DashboardStats struct {
 	DeployedPodCount       int `json:"deployed_pods"`
 	VirtualMachineCount    int `json:"vms"`
 	ClusterResourceUsage   any `json:"cluster"`
+}
+
+type CreateTemplateRequest struct {
+	Name   string       `json:"name"`
+	Router bool         `json:"add_router"`
+	VMs    []proxmox.VM `json:"vms"`
 }
 
 // =================================================

@@ -1,8 +1,10 @@
 package middleware
 
 import (
+	"log"
 	"net/http"
 
+	"github.com/cpp-cyber/proclone/internal/api/auth"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -19,23 +21,75 @@ func AuthRequired(c *gin.Context) {
 	c.Next()
 }
 
-func AdminRequired(c *gin.Context) {
-	session := sessions.Default(c)
-	id := session.Get("id")
-	if id == nil {
-		c.String(http.StatusUnauthorized, "Unauthorized")
-		c.Abort()
-		return
-	}
+func AdminRequired(authService auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session := sessions.Default(c)
+		id := session.Get("id")
+		if id == nil {
+			c.String(http.StatusUnauthorized, "Unauthorized")
+			c.Abort()
+			return
+		}
 
-	isAdmin := session.Get("isAdmin")
-	if isAdmin == nil || !isAdmin.(bool) {
-		c.String(http.StatusForbidden, "Admin access required")
-		c.Abort()
-		return
-	}
+		username := id.(string)
 
-	c.Next()
+		// Verify with Proxmox
+		isAdmin, err := authService.IsAdmin(username)
+		if err != nil {
+			log.Printf("Error verifying admin status for user %s: %v", username, err)
+			c.String(http.StatusInternalServerError, "Failed to verify permissions")
+			c.Abort()
+			return
+		}
+
+		if !isAdmin {
+			c.String(http.StatusForbidden, "Admin access required")
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// CreatorOrAdminRequired provides authorization middleware for template operations
+func CreatorOrAdminRequired(authService auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session := sessions.Default(c)
+		id := session.Get("id")
+		if id == nil {
+			c.String(http.StatusUnauthorized, "Unauthorized")
+			c.Abort()
+			return
+		}
+
+		username := id.(string)
+
+		// Verify with Proxmox for template operations
+		isAdmin, err := authService.IsAdmin(username)
+		if err != nil {
+			log.Printf("Error verifying admin status for user %s: %v", username, err)
+			c.String(http.StatusInternalServerError, "Failed to verify permissions")
+			c.Abort()
+			return
+		}
+
+		isCreator, err := authService.IsCreator(username)
+		if err != nil {
+			log.Printf("Error verifying creator status for user %s: %v", username, err)
+			c.String(http.StatusInternalServerError, "Failed to verify permissions")
+			c.Abort()
+			return
+		}
+
+		if !isAdmin && !isCreator {
+			c.String(http.StatusForbidden, "Creator or Admin access required")
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
 }
 
 func GetUser(c *gin.Context) string {

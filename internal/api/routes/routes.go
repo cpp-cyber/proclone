@@ -11,6 +11,9 @@ func RegisterRoutes(r *gin.Engine, authHandler *handlers.AuthHandler, proxmoxHan
 	// Create centralized dashboard handler
 	dashboardHandler := handlers.NewDashboardHandler(authHandler, proxmoxHandler, cloningHandler)
 
+	// Get auth service from handler for middleware
+	authService := authHandler.GetAuthService()
+
 	// Public routes (no authentication required)
 	public := r.Group("/api/v1")
 	registerPublicRoutes(public, authHandler, cloningHandler)
@@ -20,8 +23,15 @@ func RegisterRoutes(r *gin.Engine, authHandler *handlers.AuthHandler, proxmoxHan
 	private.Use(middleware.AuthRequired)
 	registerPrivateRoutes(private, authHandler, cloningHandler, dashboardHandler)
 
+	// Creator routes (authentication + creator OR admin privileges required)
+	// Template management operations accessible to both creators and admins
+	creator := r.Group("/api/v1/creator")
+	creator.Use(middleware.CreatorOrAdminRequired(authService))
+	registerCreatorRoutes(creator, proxmoxHandler, cloningHandler)
+
 	// Admin routes (authentication + admin privileges required)
+	// User/group management and system operations
 	admin := r.Group("/api/v1/admin")
-	admin.Use(middleware.AdminRequired)
+	admin.Use(middleware.AdminRequired(authService))
 	registerAdminRoutes(admin, authHandler, proxmoxHandler, cloningHandler, dashboardHandler)
 }

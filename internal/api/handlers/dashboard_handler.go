@@ -24,7 +24,7 @@ func (dh *DashboardHandler) GetAdminDashboardStatsHandler(c *gin.Context) {
 	stats := DashboardStats{}
 
 	// Get user count
-	users, err := dh.authHandler.ldapService.GetUsers()
+	users, err := dh.proxmoxHandler.service.GetUsers()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve user count", "details": err.Error()})
 		return
@@ -32,7 +32,7 @@ func (dh *DashboardHandler) GetAdminDashboardStatsHandler(c *gin.Context) {
 	stats.UserCount = len(users)
 
 	// Get group count
-	groups, err := dh.authHandler.ldapService.GetGroups()
+	groups, err := dh.proxmoxHandler.service.GetGroups()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve group count", "details": err.Error()})
 		return
@@ -102,7 +102,7 @@ func (dh *DashboardHandler) GetUserDashboardStatsHandler(c *gin.Context) {
 	}
 
 	// Get user's information
-	userInfo, err := dh.authHandler.ldapService.GetUser(username)
+	userInfo, err := dh.authHandler.proxmoxService.GetUser(username)
 	if err != nil {
 		log.Printf("Error retrieving user info for %s: %v", username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
