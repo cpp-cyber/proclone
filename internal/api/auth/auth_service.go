@@ -2,21 +2,19 @@ package auth
 
 import (
 	"fmt"
-	"slices"
+	"strings"
 
 	"github.com/cpp-cyber/proclone/internal/ldap"
-	"github.com/cpp-cyber/proclone/internal/proxmox"
 )
 
-func NewAuthService(proxmoxService *proxmox.ProxmoxService) (*AuthService, error) {
+func NewAuthService() (*AuthService, error) {
 	ldapService, err := ldap.NewLDAPService()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create LDAP service: %w", err)
 	}
 
 	return &AuthService{
-		ldapService:    ldapService,
-		proxmoxService: proxmoxService,
+		ldapService: ldapService,
 	}, nil
 }
 
@@ -53,36 +51,76 @@ func (s *AuthService) Authenticate(username string, password string) (bool, erro
 }
 
 func (s *AuthService) IsAdmin(username string) (bool, error) {
-	// Get user's groups from Proxmox
-	userGroups, err := s.proxmoxService.GetUserGroups(username)
+	// Input validation
+	if username == "" {
+		return false, fmt.Errorf("username cannot be empty")
+	}
+
+	// Get user DN
+	userDN, err := s.ldapService.GetUserDN(username)
+	if err != nil {
+		return false, fmt.Errorf("failed to get user DN: %w", err)
+	}
+
+	// Get user's groups
+	userGroups, err := s.ldapService.GetUserGroups(userDN)
 	if err != nil {
 		return false, fmt.Errorf("failed to get user groups: %w", err)
 	}
 
-	// Get the admin group name from config
-	adminGroupName := s.proxmoxService.Config.AdminGroupName
+	// Load LDAP config to get admin group DN
+	config, err := ldap.LoadConfig()
+	if err != nil {
+		return false, fmt.Errorf("failed to load LDAP config: %w", err)
+	}
+
+	if config.AdminGroupDN == "" {
+		return false, fmt.Errorf("admin group DN not configured")
+	}
 
 	// Check if user is in the admin group
-	if slices.Contains(userGroups, adminGroupName) {
-		return true, nil
+	for _, groupDN := range userGroups {
+		if strings.EqualFold(groupDN, "Proxmox-Admins") {
+			return true, nil
+		}
 	}
 
 	return false, nil
 }
 
 func (s *AuthService) IsCreator(username string) (bool, error) {
-	// Get user's groups from Proxmox
-	userGroups, err := s.proxmoxService.GetUserGroups(username)
+	// Input validation
+	if username == "" {
+		return false, fmt.Errorf("username cannot be empty")
+	}
+
+	// Get user DN
+	userDN, err := s.ldapService.GetUserDN(username)
+	if err != nil {
+		return false, fmt.Errorf("failed to get user DN: %w", err)
+	}
+
+	// Get user's groups
+	userGroups, err := s.ldapService.GetUserGroups(userDN)
 	if err != nil {
 		return false, fmt.Errorf("failed to get user groups: %w", err)
 	}
 
-	// Get the creator group name from config
-	creatorGroupName := s.proxmoxService.Config.CreatorGroupName
+	// Load LDAP config to get creator group DN
+	config, err := ldap.LoadConfig()
+	if err != nil {
+		return false, fmt.Errorf("failed to load LDAP config: %w", err)
+	}
+
+	if config.CreatorGroupDN == "" {
+		return false, fmt.Errorf("creator group DN not configured")
+	}
 
 	// Check if user is in the creator group
-	if slices.Contains(userGroups, creatorGroupName) {
-		return true, nil
+	for _, groupDN := range userGroups {
+		if strings.EqualFold(groupDN, config.CreatorGroupDN) {
+			return true, nil
+		}
 	}
 
 	return false, nil

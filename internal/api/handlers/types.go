@@ -108,6 +108,11 @@ type EditGroupRequest struct {
 	Comment string `json:"comment"`
 }
 
+type RenameGroupRequest struct {
+	OldName string `json:"old_name" binding:"required,min=1,max=100" validate:"alphanum,ascii"`
+	NewName string `json:"new_name" binding:"required,min=1,max=100" validate:"alphanum,ascii"`
+}
+
 type DashboardStats struct {
 	UserCount              int `json:"users"`
 	GroupCount             int `json:"groups"`

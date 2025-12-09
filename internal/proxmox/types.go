@@ -18,7 +18,6 @@ type ProxmoxConfig struct {
 	Realm             string        `envconfig:"PROXMOX_REALM"`
 	NodesStr          string        `envconfig:"PROXMOX_NODES"`
 	StorageID         string        `envconfig:"PROXMOX_STORAGE_ID" default:"local-lvm"`
-	AdminGroupName    string        `envconfig:"PROXMOX_ADMIN_GROUP_NAME" default:"Admin"`
 	CreatorGroupName  string        `envconfig:"PROXMOX_CREATOR_GROUP_NAME" default:"Creator"`
 	VMTemplatePool    string        `envconfig:"PROXMOX_VM_TEMPLATE_POOL" default:"Templates"`
 	RouterName        string        `envconfig:"PROXMOX_ROUTER_NAME" default:"1-1NAT-vyos"`
@@ -41,6 +40,7 @@ type Service interface {
 	GetNodeStatus(nodeName string) (*ProxmoxNodeStatus, error)
 	FindBestNode() (string, error)
 	SyncUsers() error
+	SyncGroups() error
 
 	// Pod Management
 	GetNextPodIDs(minPodID int, maxPodID int, num int) ([]string, []int, error)
@@ -80,21 +80,6 @@ type Service interface {
 	SetPodVnet(poolName string, vnetName string) error
 	GetUsedVNets() ([]VNet, error)
 	CreateTemplatePool(creator string, name string, addRouter bool, vms []VM) error
-
-	// User Management
-	GetUsers() ([]User, error)
-	GetUser(username string) (*User, error)
-	SetUserGroups(username string, groups []string) error
-	GetUserGroups(username string) ([]string, error)
-
-	// Group Management
-	GetGroups() ([]Group, error)
-	CreateGroup(groupName string, comment string) error
-	DeleteGroup(groupName string) error
-	EditGroup(groupName string, comment string) error
-	GetGroupMembers(groupName string) ([]string, error)
-	AddUsersToGroup(groupName string, usernames []string) error
-	RemoveUsersFromGroup(groupName string, usernames []string) error
 
 	// Internal access for router functionality
 	GetRequestHelper() *tools.ProxmoxRequestHelper
@@ -197,41 +182,6 @@ type ClusterResourceUsageResponse struct {
 type PendingDiskResponse struct {
 	Used int64 `json:"used"`
 	Size int64 `json:"size"`
-}
-
-type GroupsResponse struct {
-	Name    string `json:"groupid"`
-	Users   string `json:"users"`
-	Comment string `json:"comment"`
-}
-
-type Group struct {
-	Name      string `json:"name"`
-	UserCount int    `json:"user_count"`
-	Comment   string `json:"comment"`
-}
-
-type GroupMembersResponse struct {
-	Members []string `json:"members"`
-}
-
-type ProxmoxUserResponse struct {
-	ID      string `json:"userid"`
-	Comment string `json:"comment"`
-	Expire  int64  `json:"expire"`
-	Groups  string `json:"groups"`
-}
-
-type ProxmoxUserIDResponse struct {
-	ID      string   `json:"userid"`
-	Comment string   `json:"comment"`
-	Expire  int64    `json:"expire"`
-	Groups  []string `json:"groups"`
-}
-
-type User struct {
-	Name   string   `json:"name"`
-	Groups []string `json:"groups"`
 }
 
 type VNet struct {

@@ -2,7 +2,6 @@ package auth
 
 import (
 	"github.com/cpp-cyber/proclone/internal/ldap"
-	"github.com/cpp-cyber/proclone/internal/proxmox"
 )
 
 // =================================================
@@ -21,14 +20,13 @@ type Service interface {
 }
 
 type AuthService struct {
-	ldapService    ldap.Service
-	proxmoxService *proxmox.ProxmoxService
+	ldapService ldap.Service
 }
 
 // =================================================
 // Types for Auth Service (re-exported from ldap)
 // =================================================
 
-type User = proxmox.User
-type Group = proxmox.Group
+type User = ldap.User
+type Group = ldap.Group
 type UserRegistrationInfo = ldap.UserRegistrationInfo

@@ -113,6 +113,10 @@ func (s *ProxmoxService) SyncUsers() error {
 	return s.syncRealm("users")
 }
 
+func (s *ProxmoxService) SyncGroups() error {
+	return s.syncRealm("groups")
+}
+
 // =================================================
 // Private Functions
 // =================================================
