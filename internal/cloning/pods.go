@@ -9,8 +9,14 @@ import (
 )
 
 func (cs *CloningService) GetPods(username string) ([]Pod, error) {
+	// Get User DN
+	userDN, err := cs.LDAPService.GetUserDN(username)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user DN: %w", err)
+	}
+
 	// Get user's groups
-	groups, err := cs.ProxmoxService.GetUserGroups(username)
+	groups, err := cs.LDAPService.GetUserGroups(userDN)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user groups: %w", err)
 	}
