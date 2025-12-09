@@ -74,13 +74,13 @@ func (s *AuthService) IsAdmin(username string) (bool, error) {
 		return false, fmt.Errorf("failed to load LDAP config: %w", err)
 	}
 
-	if config.AdminGroupDN == "" {
+	if config.AdminGroupName == "" {
 		return false, fmt.Errorf("admin group DN not configured")
 	}
 
 	// Check if user is in the admin group
-	for _, groupDN := range userGroups {
-		if strings.EqualFold(groupDN, "Proxmox-Admins") {
+	for _, groupName := range userGroups {
+		if strings.EqualFold(groupName, config.AdminGroupName) {
 			return true, nil
 		}
 	}
@@ -112,13 +112,13 @@ func (s *AuthService) IsCreator(username string) (bool, error) {
 		return false, fmt.Errorf("failed to load LDAP config: %w", err)
 	}
 
-	if config.CreatorGroupDN == "" {
+	if config.CreatorGroupName == "" {
 		return false, fmt.Errorf("creator group DN not configured")
 	}
 
 	// Check if user is in the creator group
-	for _, groupDN := range userGroups {
-		if strings.EqualFold(groupDN, config.CreatorGroupDN) {
+	for _, groupName := range userGroups {
+		if strings.EqualFold(groupName, config.CreatorGroupName) {
 			return true, nil
 		}
 	}

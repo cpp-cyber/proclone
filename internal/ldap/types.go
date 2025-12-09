@@ -48,13 +48,13 @@ type LDAPService struct {
 // =================================================
 
 type Config struct {
-	URL            string `envconfig:"LDAP_URL" default:"ldaps://localhost:636"`
-	BindUser       string `envconfig:"LDAP_BIND_USER"`
-	BindPassword   string `envconfig:"LDAP_BIND_PASSWORD"`
-	SkipTLSVerify  bool   `envconfig:"LDAP_SKIP_TLS_VERIFY" default:"false"`
-	AdminGroupDN   string `envconfig:"LDAP_ADMIN_GROUP_DN"`
-	CreatorGroupDN string `envconfig:"LDAP_CREATOR_GROUP_DN"`
-	BaseDN         string `envconfig:"LDAP_BASE_DN"`
+	URL              string `envconfig:"LDAP_URL" default:"ldaps://localhost:636"`
+	BindUser         string `envconfig:"LDAP_BIND_USER"`
+	BindPassword     string `envconfig:"LDAP_BIND_PASSWORD"`
+	SkipTLSVerify    bool   `envconfig:"LDAP_SKIP_TLS_VERIFY" default:"false"`
+	AdminGroupName   string `envconfig:"LDAP_ADMIN_GROUP_NAME"`
+	CreatorGroupName string `envconfig:"LDAP_CREATOR_GROUP_NAME"`
+	BaseDN           string `envconfig:"LDAP_BASE_DN"`
 }
 
 type Client struct {

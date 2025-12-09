@@ -57,10 +57,10 @@ func (s *LDAPService) GetUsers() ([]User, error) {
 		// Check if user is admin or creator
 		memberOfValues := entry.GetAttributeValues("memberOf")
 		for _, memberOf := range memberOfValues {
-			if strings.Contains(memberOf, s.client.config.AdminGroupDN) {
+			if strings.Contains(memberOf, s.client.config.AdminGroupName) {
 				user.IsAdmin = true
 			}
-			if s.client.config.CreatorGroupDN != "" && strings.Contains(memberOf, s.client.config.CreatorGroupDN) {
+			if strings.Contains(memberOf, s.client.config.CreatorGroupName) {
 				user.IsCreator = true
 			}
 		}
@@ -121,10 +121,10 @@ func (s *LDAPService) GetUser(username string) (*User, error) {
 	// Check if user is admin or creator
 	memberOfValues := entry.GetAttributeValues("memberOf")
 	for _, memberOf := range memberOfValues {
-		if strings.Contains(memberOf, s.client.config.AdminGroupDN) {
+		if strings.Contains(memberOf, s.client.config.AdminGroupName) {
 			user.IsAdmin = true
 		}
-		if s.client.config.CreatorGroupDN != "" && strings.Contains(memberOf, s.client.config.CreatorGroupDN) {
+		if strings.Contains(memberOf, s.client.config.CreatorGroupName) {
 			user.IsCreator = true
 		}
 	}
