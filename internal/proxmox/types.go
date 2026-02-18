@@ -108,6 +108,7 @@ type ProxmoxNodeStatus struct {
 }
 
 type VirtualResourceConfig struct {
+	Name     string `json:"name"`
 	HardDisk string `json:"scsi0"`
 	Lock     string `json:"lock"`
 	Net0     string `json:"net0"`
