@@ -270,7 +270,23 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	// Release the vmid allocation mutex now that all of the VMs are cloned on proxmox
 	cs.vmidMutex.Unlock()
 
-	// 9. Configure VNet of all VMs
+	// 9. Wait for all router disks to be fully available before configuring VNets.
+	// Proxmox clone is two-phase: the clone lock (Phase 1) releases before the storage
+	// backend finishes writing the disk (Phase 2). If SetPodVnet runs before Phase 2
+	// completes, Proxmox's disk finalization can overwrite the net1 config change,
+	// leaving the router connected to the wrong vnet.
+	log.Printf("Waiting for router disks to be available before configuring VNets")
+	routerDiskReady := make(map[int]bool)
+	for _, routerInfo := range clonedRouters {
+		log.Printf("Waiting for router disk to be available for %s (VMID: %d)", routerInfo.TargetName, routerInfo.VMID)
+		if err := cs.ProxmoxService.WaitForDisk(routerInfo.Node, routerInfo.VMID, cs.Config.RouterWaitTimeout); err != nil {
+			errors = append(errors, fmt.Sprintf("router disk unavailable for %s: %v", routerInfo.TargetName, err))
+		} else {
+			routerDiskReady[routerInfo.VMID] = true
+		}
+	}
+
+	// 10. Configure VNet of all VMs
 	log.Printf("Configuring VNets for %d targets", len(req.Targets))
 	for _, target := range req.Targets {
 		vnetName := fmt.Sprintf("kamino%d", target.PodNumber)
@@ -281,7 +297,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		}
 	}
 
-	// 10. Start all routers and wait for them to be running
+	// 11. Start all routers and wait for them to be running
 	req.SSE.Send(
 		ProgressMessage{
 			Message:  "Starting routers",
@@ -290,11 +306,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	)
 	log.Printf("Starting %d routers", len(clonedRouters))
 	for _, routerInfo := range clonedRouters {
-		// Wait for router disk to be available
-		log.Printf("Waiting for router disk to be available for %s (VMID: %d)", routerInfo.TargetName, routerInfo.VMID)
-		err = cs.ProxmoxService.WaitForDisk(routerInfo.Node, routerInfo.VMID, cs.Config.RouterWaitTimeout)
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("router disk unavailable for %s: %v", routerInfo.TargetName, err))
+		if !routerDiskReady[routerInfo.VMID] {
 			continue
 		}
 
@@ -314,7 +326,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		}
 	}
 
-	// 11. Configure all pod routers (separate step after all routers are running)
+	// 12. Configure all pod routers (separate step after all routers are running)
 	req.SSE.Send(
 		ProgressMessage{
 			Message:  "Configuring pod routers",
