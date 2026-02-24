@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"regexp"
 	"strings"
 	"time"
 
@@ -140,7 +139,7 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 	return nil
 }
 
-func (s *ProxmoxService) SetPodVnet(poolName string, vnetName string) error {
+func (s *ProxmoxService) SetPodVnet(poolName string, vnetName string, routerVMID int) error {
 	// Get all VMs in the pool
 	vms, err := s.GetPoolVMs(poolName)
 	if err != nil {
@@ -153,14 +152,13 @@ func (s *ProxmoxService) SetPodVnet(poolName string, vnetName string) error {
 
 	log.Printf("Setting VNet %s for %d VMs in pool %s", vnetName, len(vms), poolName)
 
-	routerRegex := regexp.MustCompile(`(?i).*(router|pfsense|vyos).*`)
 	var errors []string
 
 	for _, vm := range vms {
 		vnet := "net0"
 
-		// Detect if VM is a router based on its name (lazy way but requires fewer API calls)
-		if routerRegex.MatchString(vm.Name) {
+		// Identify the router by its VMID
+		if vm.VmId == routerVMID {
 			vnet = "net1"
 			log.Printf("Detected router VM %s (VMID: %d), using %s interface", vm.Name, vm.VmId, vnet)
 		} else {
