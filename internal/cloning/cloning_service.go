@@ -291,7 +291,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	for _, target := range req.Targets {
 		vnetName := fmt.Sprintf("kamino%d", target.PodNumber)
 		log.Printf("Setting VNet %s for pool %s (target: %s)", vnetName, target.PoolName, target.Name)
-		err = cs.ProxmoxService.SetPodVnet(target.PoolName, vnetName)
+		err = cs.ProxmoxService.SetPodVnet(target.PoolName, vnetName, target.VMIDs[0])
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to update pod vnet for %s: %v", target.Name, err))
 		}
