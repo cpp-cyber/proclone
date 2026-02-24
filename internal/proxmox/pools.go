@@ -406,7 +406,7 @@ func (s *ProxmoxService) CreateTemplatePool(creator string, name string, addRout
 	vnet := fmt.Sprintf("templ%d", templateID)
 
 	log.Printf("Configuring VNet %s for pool %s", vnet, poolName)
-	err = s.SetPodVnet(poolName, vnet)
+	err = s.SetPodVnet(poolName, vnet, routerVMID)
 	if err != nil {
 		return fmt.Errorf("failed to set VNet for pool %s: %w", poolName, err)
 	}

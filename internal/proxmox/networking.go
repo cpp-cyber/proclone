@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"regexp"
 	"strings"
 	"time"
 
@@ -172,8 +171,8 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 	return nil
 }
 
-func (s *ProxmoxService) SetPodVnet(poolName string, vnetName string) error {
-	log.Printf("[kayhon] SetPodVnet START: Pool=%s, VNet=%s", poolName, vnetName)
+func (s *ProxmoxService) SetPodVnet(poolName string, vnetName string, routerVMID int) error {
+	log.Printf("[kayhon] SetPodVnet START: Pool=%s, VNet=%s, RouterVMID=%d", poolName, vnetName, routerVMID)
 
 	// Get all VMs in the pool
 	vms, err := s.GetPoolVMs(poolName)
@@ -189,18 +188,17 @@ func (s *ProxmoxService) SetPodVnet(poolName string, vnetName string) error {
 
 	log.Printf("[kayhon] SetPodVnet: Setting VNet %s for %d VMs in pool %s", vnetName, len(vms), poolName)
 
-	routerRegex := regexp.MustCompile(`(?i).*(router|pfsense|vyos).*`)
 	var errors []string
 
 	for _, vm := range vms {
 		vnet := "net0"
 
-		// Detect if VM is a router based on its name (lazy way but requires fewer API calls)
-		if routerRegex.MatchString(vm.Name) {
+		// Identify the router by its VMID
+		if vm.VmId == routerVMID {
 			vnet = "net1"
-			log.Printf("[kayhon] SetPodVnet: Detected router VM %s (VMID=%d, Node=%s), using %s interface", vm.Name, vm.VmId, vm.NodeName, vnet)
+			log.Printf("[kayhon] SetPodVnet: Router VM (VMID=%d, Node=%s), using %s interface", vm.VmId, vm.NodeName, vnet)
 		} else {
-			log.Printf("[kayhon] SetPodVnet: Regular VM %s (VMID=%d, Node=%s), using %s interface", vm.Name, vm.VmId, vm.NodeName, vnet)
+			log.Printf("[kayhon] SetPodVnet: Regular VM (VMID=%d, Node=%s), using %s interface", vm.VmId, vm.NodeName, vnet)
 		}
 
 		// Update VM network configuration
