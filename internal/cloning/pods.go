@@ -23,7 +23,7 @@ func (cs *CloningService) GetPods(username string) ([]Pod, error) {
 
 	// Build regex pattern to match username or any of their group names
 	groupsWithUser := append(groups, username)
-	regexPattern := fmt.Sprintf(`(?i)1[0-9]{3}_.*_(%s)`, strings.Join(groupsWithUser, "|"))
+	regexPattern := fmt.Sprintf(`(?i)1[0-9]{3}_.*_(%s)$`, strings.Join(groupsWithUser, "|"))
 
 	// Get pods based on regex pattern
 	pods, err := cs.MapVirtualResourcesToPods(regexPattern)
