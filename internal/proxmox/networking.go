@@ -39,33 +39,6 @@ func (s *ProxmoxService) GetRouterType(router VM) (string, error) {
 	}
 }
 
-// agentExecWithRetry retries an agent/exec request with exponential backoff.
-// The QEMU guest agent may respond to pings before it's fully ready to handle
-// exec commands (Proxmox returns status 596 in that case).
-func (s *ProxmoxService) agentExecWithRetry(execReq tools.ProxmoxAPIRequest) error {
-	backoff := 2 * time.Second
-	maxBackoff := 15 * time.Second
-	maxRetries := 10
-
-	var lastErr error
-	for attempt := range maxRetries {
-		_, lastErr = s.RequestHelper.MakeRequest(execReq)
-		if lastErr == nil {
-			return nil
-		}
-
-		if !strings.Contains(lastErr.Error(), "status 596") {
-			return lastErr // Non-retryable error
-		}
-
-		log.Printf("agent/exec attempt %d/%d failed with status 596, retrying in %v", attempt+1, maxRetries, backoff)
-		time.Sleep(backoff)
-		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
-	}
-
-	return lastErr
-}
-
 // ConfigurePodRouter configures the pod router with proper networking settings
 func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int, routerType string, poolName string) error {
 	config := RouterConfig{
@@ -99,7 +72,7 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
 	}
 
-	// Configure depending on router type
+	// Clone depending on router type
 	switch routerType {
 	case "pfsense":
 		// Configure router WAN IP to have correct third octet using qemu agent API call
@@ -116,7 +89,8 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 			RequestBody: reqBody,
 		}
 
-		if err := s.agentExecWithRetry(execReq); err != nil {
+		_, err := s.RequestHelper.MakeRequest(execReq)
+		if err != nil {
 			return fmt.Errorf("failed to make IP change request: %v", err)
 		}
 
@@ -134,7 +108,8 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 			RequestBody: vipReqBody,
 		}
 
-		if err := s.agentExecWithRetry(vipExecReq); err != nil {
+		_, err = s.RequestHelper.MakeRequest(vipExecReq)
+		if err != nil {
 			return fmt.Errorf("failed to make VIP change request: %v", err)
 		}
 	case "vyos":
@@ -153,7 +128,8 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 			RequestBody: reqBody,
 		}
 
-		if err := s.agentExecWithRetry(execReq); err != nil {
+		_, err := s.RequestHelper.MakeRequest(execReq)
+		if err != nil {
 			return fmt.Errorf("failed to run VyOS setup script: %v", err)
 		}
 
