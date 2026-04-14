@@ -26,7 +26,7 @@ type ProxmoxConfig struct {
 	RouterWaitTimeout time.Duration `envconfig:"ROUTER_WAIT_TIMEOUT" default:"120s"`
 	WANScriptPath     string        `envconfig:"WAN_SCRIPT_PATH" default:"/home/update-wan-ip.sh"`
 	VIPScriptPath     string        `envconfig:"VIP_SCRIPT_PATH" default:"/home/update-wan-vip.sh"`
-	VYOSScriptPath    string        `envconfig:"VYOS_SCRIPT_PATH" default:"/config/scripts/setup.sh"`
+	VYOSScriptPath    string        `envconfig:"VYOS_SCRIPT_PATH" default:"/config/scripts/vyos-postconfig-bootup.script"`
 	WANIPBase         string        `envconfig:"WAN_IP_BASE" default:"172.16."`
 	Nodes             []string      // Parsed from NodesStr
 	APIToken          string        // Computed from TokenID and TokenSecret
@@ -76,7 +76,7 @@ type Service interface {
 
 	// Networking
 	GetRouterType(router VM) (string, error)
-	ConfigurePodRouter(podNumber int, node string, vmid int, routerType string, poolName string) error
+	ConfigurePodRouter(podNumber int, node string, vmid int, routerType string) error
 	SetPodVnet(poolName string, vnetName string, routerVMID int) error
 	GetUsedVNets() ([]VNet, error)
 	CreateTemplatePool(creator string, name string, addRouter bool, vms []VM) error

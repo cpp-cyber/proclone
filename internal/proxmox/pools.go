@@ -446,7 +446,7 @@ func (s *ProxmoxService) CreateTemplatePool(creator string, name string, addRout
 	log.Printf("Third octect is %d", octect)
 
 	log.Printf("Configuring router")
-	err = s.ConfigurePodRouter(octect, bestNode, routerVMID, routerType, poolName)
+	err = s.ConfigurePodRouter(octect, bestNode, routerVMID, routerType)
 	if err != nil {
 		return fmt.Errorf("failed to configure router for %s: %v", routerType, err)
 	}

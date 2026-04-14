@@ -40,7 +40,7 @@ func (s *ProxmoxService) GetRouterType(router VM) (string, error) {
 }
 
 // ConfigurePodRouter configures the pod router with proper networking settings
-func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int, routerType string, poolName string) error {
+func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int, routerType string) error {
 	config := RouterConfig{
 		WANScriptPath:  s.Config.WANScriptPath,
 		VIPScriptPath:  s.Config.VIPScriptPath,
@@ -115,10 +115,9 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 	case "vyos":
 		reqBody := map[string]any{
 			"command": []string{
-				config.VYOSScriptPath,
-				fmt.Sprintf("%d", podNumber),
-				config.WANIPBase,
-				poolName,
+				"sh",
+				"-c",
+				fmt.Sprintf("sed -i -e 's/{{THIRD_OCTET}}/%d/g;s/{{NETWORK_PREFIX}}/%s/g' %s", podNumber, config.WANIPBase, config.VYOSScriptPath),
 			},
 		}
 
@@ -130,7 +129,7 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 
 		_, err := s.RequestHelper.MakeRequest(execReq)
 		if err != nil {
-			return fmt.Errorf("failed to run VyOS setup script: %v", err)
+			return fmt.Errorf("failed to make IP change request: %v", err)
 		}
 
 	default:
