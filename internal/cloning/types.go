@@ -119,6 +119,7 @@ type CloneRequest struct {
 
 type RouterInfo struct {
 	TargetName string
+	PoolName   string
 	RouterType string
 	PodNumber  int
 	Node       string
