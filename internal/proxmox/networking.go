@@ -140,9 +140,10 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 	case "vyos":
 		reqBody := map[string]any{
 			"command": []string{
-				"sh",
-				"-c",
-				fmt.Sprintf("sed -i -e 's/{{THIRD_OCTET}}/%d/g;s/{{NETWORK_PREFIX}}/%s/g;s/{{POOL_NAME}}/%s/g' %s", podNumber, config.WANIPBase, poolName, config.VYOSScriptPath),
+				config.VYOSScriptPath,
+				fmt.Sprintf("%d", podNumber),
+				config.WANIPBase,
+				poolName,
 			},
 		}
 
@@ -153,7 +154,7 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 		}
 
 		if err := s.agentExecWithRetry(execReq); err != nil {
-			return fmt.Errorf("failed to configure VyOS postconfig script: %v", err)
+			return fmt.Errorf("failed to run VyOS setup script: %v", err)
 		}
 
 	default:
