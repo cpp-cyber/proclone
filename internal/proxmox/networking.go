@@ -40,7 +40,7 @@ func (s *ProxmoxService) GetRouterType(router VM) (string, error) {
 }
 
 // ConfigurePodRouter configures the pod router with proper networking settings
-func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int, routerType string) error {
+func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int, routerType string, hostname string) error {
 	config := RouterConfig{
 		WANScriptPath:  s.Config.WANScriptPath,
 		VIPScriptPath:  s.Config.VIPScriptPath,
@@ -117,7 +117,7 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 			"command": []string{
 				"sh",
 				"-c",
-				fmt.Sprintf("sed -i -e 's/{{THIRD_OCTET}}/%d/g;s/{{NETWORK_PREFIX}}/%s/g' %s", podNumber, config.WANIPBase, config.VYOSScriptPath),
+				fmt.Sprintf("sed -i -e 's/{{THIRD_OCTET}}/%d/g;s/{{NETWORK_PREFIX}}/%s/g;s/{{HOSTNAME}}/%s/g' %s", podNumber, config.WANIPBase, hostname, config.VYOSScriptPath),
 			},
 		}
 

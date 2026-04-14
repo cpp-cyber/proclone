@@ -76,7 +76,7 @@ type Service interface {
 
 	// Networking
 	GetRouterType(router VM) (string, error)
-	ConfigurePodRouter(podNumber int, node string, vmid int, routerType string) error
+	ConfigurePodRouter(podNumber int, node string, vmid int, routerType string, hostname string) error
 	SetPodVnet(poolName string, vnetName string, routerVMID int) error
 	GetUsedVNets() ([]VNet, error)
 	CreateTemplatePool(creator string, name string, addRouter bool, vms []VM) error

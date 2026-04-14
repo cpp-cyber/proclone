@@ -123,6 +123,7 @@ type RouterInfo struct {
 	PodNumber  int
 	Node       string
 	VMID       int
+	PoolName   string
 }
 
 type ProgressMessage struct {

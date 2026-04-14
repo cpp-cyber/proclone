@@ -206,6 +206,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 				PodNumber:  target.PodNumber,
 				Node:       bestNode,
 				VMID:       target.VMIDs[0],
+				PoolName:   target.PoolName,
 			})
 		}
 
@@ -344,7 +345,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		}
 
 		log.Printf("Configuring pod router for %s (Pod: %d, VMID: %d)", routerInfo.TargetName, routerInfo.PodNumber, routerInfo.VMID)
-		err = cs.ProxmoxService.ConfigurePodRouter(routerInfo.PodNumber, routerInfo.Node, routerInfo.VMID, routerInfo.RouterType)
+		err = cs.ProxmoxService.ConfigurePodRouter(routerInfo.PodNumber, routerInfo.Node, routerInfo.VMID, routerInfo.RouterType, routerInfo.PoolName)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to configure pod router for %s: %v", routerInfo.TargetName, err))
 		}
