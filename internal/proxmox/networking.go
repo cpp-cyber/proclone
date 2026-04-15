@@ -18,7 +18,7 @@ type agentExecResult struct {
 
 // agentExecStatus holds the response from agent/exec-status
 type agentExecStatus struct {
-	Exited   bool   `json:"exited"`
+	Exited   int    `json:"exited"`
 	ExitCode int    `json:"exitcode"`
 	OutData  string `json:"out-data"`
 	ErrData  string `json:"err-data"`
@@ -74,7 +74,7 @@ func (s *ProxmoxService) execAgentCommand(node string, vmid int, command []strin
 			return fmt.Errorf("failed to parse agent exec-status response: %v", err)
 		}
 
-		if !status.Exited {
+		if status.Exited == 0 {
 			time.Sleep(2 * time.Second)
 			continue
 		}
