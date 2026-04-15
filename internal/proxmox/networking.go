@@ -172,6 +172,12 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 			return fmt.Errorf("failed to make VIP change request: %v", err)
 		}
 	case "vyos":
+		// Wait for /config to be mounted before modifying the script
+		waitCmd := fmt.Sprintf("for i in $(seq 1 30); do [ -f %s ] && exit 0; sleep 2; done; exit 1", config.VYOSScriptPath)
+		if err := s.execAgentCommand(node, vmid, []string{"sh", "-c", waitCmd}); err != nil {
+			return fmt.Errorf("timed out waiting for %s to be available: %v", config.VYOSScriptPath, err)
+		}
+
 		err := s.execAgentCommand(node, vmid, []string{
 			"sh",
 			"-c",
