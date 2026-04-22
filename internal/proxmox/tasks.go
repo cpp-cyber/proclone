@@ -38,9 +38,10 @@ func (s *ProxmoxService) stopTask(node string, upid string) error {
 		Endpoint: fmt.Sprintf("/nodes/%s/tasks/%s", node, upid),
 	}
 
-	var nilResponse string
-	if err := s.RequestHelper.MakeRequestAndUnmarshal(taskReq, &nilResponse); err != nil {
+	_, err := s.RequestHelper.MakeRequest(taskReq)
+	if err != nil {
 		return err
 	}
+
 	return nil
 }

@@ -173,7 +173,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		},
 	)
 
-	cloningUPIDs := []cloningTask
+	cloningUPIDs := []cloningTask{}
 
 	for _, target := range req.Targets {
 		// Find best node per target
@@ -212,7 +212,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 			})
 			cloningUPIDs = append(cloningUPIDs, cloningTask{
 				UPID:       upid,
-				Node        bestNode,
+				Node:       bestNode,
 			})
 		}
 
