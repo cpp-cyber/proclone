@@ -205,7 +205,7 @@ type Task struct {
 	ExitStatus string `json:"exitstatus"`
 }
 
-type cloningTask struct {
+type CloningTask struct {
 	UPID     string `json:"upid"`
 	Node     string `json:"node"`
 }
