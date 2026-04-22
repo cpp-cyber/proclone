@@ -18,3 +18,29 @@ func (s *ProxmoxService) getActiveCloningTasks(node string) ([]Task, error) {
 	}
 	return activeCloningTasks, nil
 }
+
+func (s *ProxmoxService) getTaskFromUPID(node string, upid string) (Task, error) {
+	taskReq := tools.ProxmoxAPIRequest{
+		Method:   "GET",
+		Endpoint: fmt.Sprintf("/nodes/%s/tasks/%s/status", node, upid),
+	}
+
+	var taskStatus Task
+	if err := s.RequestHelper.MakeRequestAndUnmarshal(taskReq, &taskStatus); err != nil {
+		return nil, err
+	}
+	return taskStatus, nil
+}
+
+func (s *ProxmoxService) stopTask(node string, upid string) error {
+	taskReq := tools.ProxmoxAPIRequest{
+		Method:   "DELETE",
+		Endpoint: fmt.Sprintf("/nodes/%s/tasks/%s", node, upid),
+	}
+
+	var nilResponse string
+	if err := s.RequestHelper.MakeRequestAndUnmarshal(taskReq, &nilResponse); err != nil {
+		return err
+	}
+	return nil
+}

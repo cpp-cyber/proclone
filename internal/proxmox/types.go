@@ -60,6 +60,7 @@ type Service interface {
 	CloneVM(req VMCloneRequest) error
 	WaitForDisk(node string, vmID int, maxWait time.Duration) error
 	WaitForLock(node string, vmID int) error
+	WaitForCloneTask(node string, upid string) error
 	WaitForRunning(node string, vmID int) error
 	WaitForStopped(node string, vmID int) error
 
@@ -202,4 +203,9 @@ type Task struct {
 	EndTime    int64  `json:"endtime"`
 	Status     string `json:"status"`
 	ExitStatus string `json:"exitstatus"`
+}
+
+type cloningTask struct {
+	UPID     string `json:"upid"`
+	Node     string `json:"node"`
 }

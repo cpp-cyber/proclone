@@ -284,6 +284,33 @@ func (s *ProxmoxService) WaitForLock(node string, vmID int) error {
 	return fmt.Errorf("timeout waiting for VM lock to be cleared")
 }
 
+func (s *ProxmoxService) WaitForCloneTask(node string, upid string) error {
+	timeout := 1 * time.Minute
+	start := time.Now()
+
+	for time.Since(start) < timeout {
+		task, err := s.getTaskFromUPID(node, upid)
+		if err != nil {
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		log.Printf("Clone task %s status: '%s'", upid, task.Status)
+
+		if task.Status == "stopped" {
+			return nil // Task finished
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+
+	if err := s.stopTask(node, upid); err != nil {
+		return fmt.Errorf("failed to stop task after timeout, continuing anyway")
+	}
+
+	return fmt.Errorf("timeout waiting for cloning task to be stopped")
+}
+
 // =================================================
 // Private Functions
 // =================================================

@@ -173,6 +173,8 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 		},
 	)
 
+	cloningUPIDs := []cloningTask
+
 	for _, target := range req.Targets {
 		// Find best node per target
 		bestNode, err := cs.ProxmoxService.FindBestNode()
@@ -189,7 +191,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 			NewVMID:    target.VMIDs[0],
 			TargetNode: bestNode,
 		}
-		err = cs.ProxmoxService.CloneVM(routerCloneReq)
+		upid, err = cs.ProxmoxService.cloneVMWithUPID(routerCloneReq)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to clone router VM for %s: %v", target.Name, err))
 		} else {
@@ -208,6 +210,10 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 				VMID:       target.VMIDs[0],
 				PoolName:   target.PoolName,
 			})
+			cloningUPIDs = append(cloningUPIDs, cloningTask{
+				UPID:       upid,
+				Node        bestNode,
+			})
 		}
 
 		// Clone each VM to new pool
@@ -219,10 +225,14 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 				NewVMID:    target.VMIDs[i+1],
 				TargetNode: bestNode,
 			}
-			err := cs.ProxmoxService.CloneVM(vmCloneReq)
+			upid, err = cs.ProxmoxService.cloneVMWithUPID(vmCloneReq)
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("failed to clone VM %s for %s: %v", vm.Name, target.Name, err))
 			}
+			cloningUPIDs = append(cloningUPIDs, cloningTask{
+				UPID:       upid,
+				Node:       bestNode,
+			})
 		}
 	}
 
@@ -250,18 +260,14 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 			time.Sleep(2 * time.Second)
 		}
 
-		// Wait for all VM locks to be released
-		log.Printf("Waiting for all VM clone operations to complete for pool %s (checking locks)", target.PoolName)
-		poolVMs, err := cs.ProxmoxService.GetPoolVMs(target.PoolName)
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("failed to get pool VMs after waiting for %s: %v", target.Name, err))
-			continue
-		}
+		// Wait for all VM cloning tasks to be completed
+		log.Printf("Waiting for all VM clone operations to complete for pool %s (checking tasks)", target.PoolName)
 
-		for _, vm := range poolVMs {
-			log.Printf("Waiting for VM %d (%s) lock to be released", vm.VmId, vm.Name)
-			if err := cs.ProxmoxService.WaitForLock(vm.NodeName, vm.VmId); err != nil {
-				log.Printf("Warning: timeout waiting for VM %d lock, continuing anyway: %v", vm.VmId, err)
+		// Stop long running clones before releasing mutex
+		for _, cloningUPID := range cloningUPIDs {
+			log.Printf("Waiting for clone task %s to finish on node %s", cloningUPID.UPID, cloningUPID.Node)
+			if err := cs.ProxmoxService.WaitForCloneTask(cloningUPID.Node, cloningUPID.UPID); err != nil {
+				log.Printf("Warning: timeout waiting for clone task %s, Error: %v", cloningUPID.UPID, err)
 			}
 		}
 
