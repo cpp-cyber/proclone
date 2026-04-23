@@ -212,7 +212,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 			})
 			cloningUPIDs = append(cloningUPIDs, proxmox.CloningTask{
 				UPID:       upid,
-				Node:       bestNode,
+				Node:       router.Node,
 			})
 		}
 
@@ -231,7 +231,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 			}
 			cloningUPIDs = append(cloningUPIDs, proxmox.CloningTask{
 				UPID:       upid,
-				Node:       bestNode,
+				Node:       vm.Node,
 			})
 		}
 	}
