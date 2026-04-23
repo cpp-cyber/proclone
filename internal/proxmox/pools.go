@@ -320,7 +320,7 @@ func (s *ProxmoxService) CreateTemplatePool(creator string, name string, addRout
 		// Remove the first VMID from the list
 		vmIDs = vmIDs[1:]
 
-		upid, err := s.cloneVMWithUPID(routerCloneReq)
+		upid, err := s.CloneVMWithUPID(routerCloneReq)
 		if err != nil {
 			return err
 		}
@@ -337,7 +337,7 @@ func (s *ProxmoxService) CreateTemplatePool(creator string, name string, addRout
 			TargetNode: bestNode,
 		}
 
-		upid, err := s.cloneVMWithUPID(vmCloneReq)
+		upid, err := s.CloneVMWithUPID(vmCloneReq)
 		if err != nil {
 			return err
 		}

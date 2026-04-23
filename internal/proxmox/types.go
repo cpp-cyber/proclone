@@ -58,6 +58,7 @@ type Service interface {
 	DeleteVMSnapshot(node string, vmID int, snapshotName string) error
 	ConvertVMToTemplate(node string, vmID int) error
 	CloneVM(req VMCloneRequest) error
+	CloneVMWithUPID(req VMCloneRequest) (string, error)
 	WaitForDisk(node string, vmID int, maxWait time.Duration) error
 	WaitForLock(node string, vmID int) error
 	WaitForCloneTask(node string, upid string) error

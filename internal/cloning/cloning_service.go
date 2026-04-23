@@ -191,7 +191,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 			NewVMID:    target.VMIDs[0],
 			TargetNode: bestNode,
 		}
-		upid, err = s.cloneVMWithUPID(routerCloneReq)
+		upid, err := cs.ProxmoxService.CloneVMWithUPID(routerCloneReq)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("failed to clone router VM for %s: %v", target.Name, err))
 		} else {
@@ -225,7 +225,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 				NewVMID:    target.VMIDs[i+1],
 				TargetNode: bestNode,
 			}
-			upid, err = s.cloneVMWithUPID(vmCloneReq)
+			upid, err := cs.ProxmoxService.CloneVMWithUPID(vmCloneReq)
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("failed to clone VM %s for %s: %v", vm.Name, target.Name, err))
 			}

@@ -144,7 +144,7 @@ func (s *ProxmoxService) CloneVM(req VMCloneRequest) error {
 	return nil
 }
 
-func (s *ProxmoxService) cloneVMWithUPID(req VMCloneRequest) (string, error) {
+func (s *ProxmoxService) CloneVMWithUPID(req VMCloneRequest) (string, error) {
 	// Clone VM
 	cloneBody := map[string]any{
 		"newid":  req.NewVMID,
