@@ -58,8 +58,10 @@ type Service interface {
 	DeleteVMSnapshot(node string, vmID int, snapshotName string) error
 	ConvertVMToTemplate(node string, vmID int) error
 	CloneVM(req VMCloneRequest) error
+	CloneVMWithUPID(req VMCloneRequest) (string, error)
 	WaitForDisk(node string, vmID int, maxWait time.Duration) error
 	WaitForLock(node string, vmID int) error
+	WaitForCloneTask(node string, upid string) error
 	WaitForRunning(node string, vmID int) error
 	WaitForStopped(node string, vmID int) error
 
@@ -76,7 +78,7 @@ type Service interface {
 
 	// Networking
 	GetRouterType(router VM) (string, error)
-	ConfigurePodRouter(podNumber int, node string, vmid int, routerType string) error
+	ConfigurePodRouter(podNumber int, node string, vmid int, routerType string, hostname string) error
 	SetPodVnet(poolName string, vnetName string, routerVMID int) error
 	GetUsedVNets() ([]VNet, error)
 	CreateTemplatePool(creator string, name string, addRouter bool, vms []VM) error
@@ -202,4 +204,9 @@ type Task struct {
 	EndTime    int64  `json:"endtime"`
 	Status     string `json:"status"`
 	ExitStatus string `json:"exitstatus"`
+}
+
+type CloningTask struct {
+	UPID     string `json:"upid"`
+	Node     string `json:"node"`
 }

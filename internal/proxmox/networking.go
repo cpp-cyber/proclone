@@ -1,6 +1,7 @@
 package proxmox
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -9,6 +10,84 @@ import (
 
 	"github.com/cpp-cyber/proclone/internal/tools"
 )
+
+// agentExecResult holds the response from agent/exec
+type agentExecResult struct {
+	PID int `json:"pid"`
+}
+
+// agentExecStatus holds the response from agent/exec-status
+type agentExecStatus struct {
+	Exited   int    `json:"exited"`
+	ExitCode int    `json:"exitcode"`
+	OutData  string `json:"out-data"`
+	ErrData  string `json:"err-data"`
+}
+
+// execAgentCommand runs a command via the QEMU guest agent and waits for it to complete,
+// returning an error if the command fails.
+func (s *ProxmoxService) execAgentCommand(node string, vmid int, command []string) error {
+	reqBody := map[string]any{
+		"command": command,
+	}
+
+	execReq := tools.ProxmoxAPIRequest{
+		Method:      "POST",
+		Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/agent/exec", node, vmid),
+		RequestBody: reqBody,
+	}
+
+	rsp, err := s.RequestHelper.MakeRequest(execReq)
+	if err != nil {
+		return fmt.Errorf("agent exec request failed: %v", err)
+	}
+
+	var result agentExecResult
+	if err := json.Unmarshal(rsp, &result); err != nil {
+		return fmt.Errorf("failed to parse agent exec response: %v", err)
+	}
+
+	log.Printf("Agent exec started on VM %d with PID %d: %v", vmid, result.PID, command)
+
+	// Poll exec-status until the command finishes
+	statusReq := tools.ProxmoxAPIRequest{
+		Method:   "GET",
+		Endpoint: fmt.Sprintf("/nodes/%s/qemu/%d/agent/exec-status?pid=%d", node, vmid, result.PID),
+	}
+
+	timeout := 60 * time.Second
+	startTime := time.Now()
+	for {
+		if time.Since(startTime) > timeout {
+			return fmt.Errorf("agent exec timed out waiting for PID %d on VM %d", result.PID, vmid)
+		}
+
+		statusRsp, err := s.RequestHelper.MakeRequest(statusReq)
+		if err != nil {
+			// exec-status returns 500 while the command is still running
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		var status agentExecStatus
+		if err := json.Unmarshal(statusRsp, &status); err != nil {
+			return fmt.Errorf("failed to parse agent exec-status response: %v", err)
+		}
+
+		if status.Exited == 0 {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		if status.ExitCode != 0 {
+			return fmt.Errorf("agent exec on VM %d exited with code %d, stderr: %s, stdout: %s",
+				vmid, status.ExitCode, status.ErrData, status.OutData)
+		}
+
+		log.Printf("Agent exec on VM %d PID %d completed successfully", vmid, result.PID)
+		return nil
+	}
+}
 
 // RouterConfig holds configuration needed for router operations
 type RouterConfig struct {
@@ -40,7 +119,7 @@ func (s *ProxmoxService) GetRouterType(router VM) (string, error) {
 }
 
 // ConfigurePodRouter configures the pod router with proper networking settings
-func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int, routerType string) error {
+func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int, routerType string, hostname string) error {
 	config := RouterConfig{
 		WANScriptPath:  s.Config.WANScriptPath,
 		VIPScriptPath:  s.Config.VIPScriptPath,
@@ -72,62 +151,38 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
 	}
 
-	// Clone depending on router type
+	// Configure depending on router type
 	switch routerType {
 	case "pfsense":
 		// Configure router WAN IP to have correct third octet using qemu agent API call
-		reqBody := map[string]any{
-			"command": []string{
-				config.WANScriptPath,
-				fmt.Sprintf("%s%d.1", config.WANIPBase, podNumber),
-			},
-		}
-
-		execReq := tools.ProxmoxAPIRequest{
-			Method:      "POST",
-			Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/agent/exec", node, vmid),
-			RequestBody: reqBody,
-		}
-
-		_, err := s.RequestHelper.MakeRequest(execReq)
+		err := s.execAgentCommand(node, vmid, []string{
+			config.WANScriptPath,
+			fmt.Sprintf("%s%d.1", config.WANIPBase, podNumber),
+		})
 		if err != nil {
 			return fmt.Errorf("failed to make IP change request: %v", err)
 		}
 
-		// Send agent exec request to change VIP subnet
-		vipReqBody := map[string]any{
-			"command": []string{
-				config.VIPScriptPath,
-				fmt.Sprintf("%s%d.0", config.WANIPBase, podNumber),
-			},
-		}
-
-		vipExecReq := tools.ProxmoxAPIRequest{
-			Method:      "POST",
-			Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/agent/exec", node, vmid),
-			RequestBody: vipReqBody,
-		}
-
-		_, err = s.RequestHelper.MakeRequest(vipExecReq)
+		// Change VIP subnet
+		err = s.execAgentCommand(node, vmid, []string{
+			config.VIPScriptPath,
+			fmt.Sprintf("%s%d.0", config.WANIPBase, podNumber),
+		})
 		if err != nil {
 			return fmt.Errorf("failed to make VIP change request: %v", err)
 		}
 	case "vyos":
-		reqBody := map[string]any{
-			"command": []string{
-				"sh",
-				"-c",
-				fmt.Sprintf("sed -i -e 's/{{THIRD_OCTET}}/%d/g;s/{{NETWORK_PREFIX}}/%s/g' %s", podNumber, config.WANIPBase, config.VYOSScriptPath),
-			},
+		// Wait for /config to be mounted before modifying the script
+		waitCmd := fmt.Sprintf("for i in $(seq 1 30); do [ -f %s ] && exit 0; sleep 2; done; exit 1", config.VYOSScriptPath)
+		if err := s.execAgentCommand(node, vmid, []string{"sh", "-c", waitCmd}); err != nil {
+			return fmt.Errorf("timed out waiting for %s to be available: %v", config.VYOSScriptPath, err)
 		}
 
-		execReq := tools.ProxmoxAPIRequest{
-			Method:      "POST",
-			Endpoint:    fmt.Sprintf("/nodes/%s/qemu/%d/agent/exec", node, vmid),
-			RequestBody: reqBody,
-		}
-
-		_, err := s.RequestHelper.MakeRequest(execReq)
+		err := s.execAgentCommand(node, vmid, []string{
+			"sh",
+			"-c",
+			fmt.Sprintf("sed -i -e 's/{{THIRD_OCTET}}/%d/g;s/{{NETWORK_PREFIX}}/%s/g;s/{{HOSTNAME}}/%s/g' %s", podNumber, config.WANIPBase, hostname, config.VYOSScriptPath),
+		})
 		if err != nil {
 			return fmt.Errorf("failed to make IP change request: %v", err)
 		}
