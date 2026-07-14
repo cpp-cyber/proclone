@@ -16,7 +16,7 @@ import (
 func (s *ProxmoxService) GetPoolVMs(poolName string) ([]VirtualResource, error) {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
-		Endpoint: fmt.Sprintf("/pools/?poolid=%s", poolName),
+		Endpoint: fmt.Sprintf("/pools/%s", poolName),
 	}
 
 	var poolResponse struct {
@@ -92,7 +92,7 @@ func (s *ProxmoxService) SetPoolPermission(poolName string, targetName string, i
 func (s *ProxmoxService) DeletePool(poolName string) error {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "DELETE",
-		Endpoint: fmt.Sprintf("/pools/?poolid=%s", poolName),
+		Endpoint: fmt.Sprintf("/pools/%s", poolName),
 	}
 
 	_, err := s.RequestHelper.MakeRequest(req)
