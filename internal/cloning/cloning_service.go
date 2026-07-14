@@ -146,7 +146,7 @@ func (cs *CloningService) CloneTemplate(req CloneRequest) error {
 	}
 
 	for i := range req.Targets {
-		req.Targets[i].PoolName = fmt.Sprintf("%s_%s_%s", podIDs[i], req.Template, req.Targets[i].Name)
+		req.Targets[i].PoolName = fmt.Sprintf("pod_%s_%s_%s", podIDs[i], req.Template, req.Targets[i].Name)
 		req.Targets[i].PodID = podIDs[i]
 		req.Targets[i].PodNumber = podNumbers[i]
 		req.Targets[i].VMIDs = vmIDs[i*(numVMsPerTarget) : (i+1)*(numVMsPerTarget)]
