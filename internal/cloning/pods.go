@@ -3,10 +3,24 @@ package cloning
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/cpp-cyber/proclone/internal/proxmox"
 )
+
+func PodPoolDeploymentName(poolName string) (string, bool) {
+	name := strings.TrimPrefix(poolName, "pod_")
+	if len(name) < 5 || name[4] != '_' {
+		return "", false
+	}
+
+	if _, err := strconv.Atoi(name[:4]); err != nil {
+		return "", false
+	}
+
+	return name[5:], true
+}
 
 func (cs *CloningService) GetPods(username string) ([]Pod, error) {
 	// Get User DN
@@ -23,7 +37,10 @@ func (cs *CloningService) GetPods(username string) ([]Pod, error) {
 
 	// Build regex pattern to match username or any of their group names
 	groupsWithUser := append(groups, username)
-	regexPattern := fmt.Sprintf(`(?i)1[0-9]{3}_.*_(%s)$`, strings.Join(groupsWithUser, "|"))
+	for i := range groupsWithUser {
+		groupsWithUser[i] = regexp.QuoteMeta(groupsWithUser[i])
+	}
+	regexPattern := fmt.Sprintf(`(?i)^(?:pod_)?1[0-9]{3}_.*_(%s)$`, strings.Join(groupsWithUser, "|"))
 
 	// Get pods based on regex pattern
 	pods, err := cs.MapVirtualResourcesToPods(regexPattern)
@@ -34,7 +51,7 @@ func (cs *CloningService) GetPods(username string) ([]Pod, error) {
 }
 
 func (cs *CloningService) AdminGetPods() ([]Pod, error) {
-	pods, err := cs.MapVirtualResourcesToPods(`1[0-9]{3}_.*`)
+	pods, err := cs.MapVirtualResourcesToPods(`(?i)^(?:pod_)?1[0-9]{3}_.*`)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +104,12 @@ func (cs *CloningService) ValidateCloneRequest(templateName string, username str
 
 	for _, pod := range podPools {
 		// Remove the Pod ID number and _ to compare
-		if !alreadyDeployed && strings.EqualFold(pod.Name[5:], templateName) {
+		deploymentName, ok := PodPoolDeploymentName(pod.Name)
+		if !ok {
+			continue
+		}
+
+		if !alreadyDeployed && strings.EqualFold(deploymentName, templateName) {
 			alreadyDeployed = true
 		}
 

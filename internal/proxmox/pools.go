@@ -127,6 +127,20 @@ func (s *ProxmoxService) GetTemplatePools() ([]string, error) {
 	return templatePools, nil
 }
 
+func parsePodIDFromPoolName(poolName string) (int, bool) {
+	name := strings.TrimPrefix(poolName, "pod_")
+	if len(name) < 4 {
+		return 0, false
+	}
+
+	id, err := strconv.Atoi(name[:4])
+	if err != nil {
+		return 0, false
+	}
+
+	return id, true
+}
+
 func (s *ProxmoxService) IsPoolEmpty(poolName string) (bool, error) {
 	poolVMs, err := s.GetPoolVMs(poolName)
 	if err != nil {
@@ -187,12 +201,8 @@ func (s *ProxmoxService) GetNextPodID(minPodID int, maxPodID int) (string, int, 
 	// Extract pod IDs from existing pools
 	var usedIDs []int
 	for _, pool := range poolsResponse {
-		if len(pool.PoolID) >= 4 {
-			if id, err := strconv.Atoi(pool.PoolID[:4]); err == nil {
-				if id >= minPodID && id <= maxPodID {
-					usedIDs = append(usedIDs, id)
-				}
-			}
+		if id, ok := parsePodIDFromPoolName(pool.PoolID); ok && id >= minPodID && id <= maxPodID {
+			usedIDs = append(usedIDs, id)
 		}
 	}
 
@@ -226,12 +236,8 @@ func (s *ProxmoxService) GetNextPodIDs(minPodID int, maxPodID int, num int) ([]s
 	// Extract pod IDs from existing pools
 	var usedIDs []int
 	for _, pool := range poolsResponse {
-		if len(pool.PoolID) >= 4 {
-			if id, err := strconv.Atoi(pool.PoolID[:4]); err == nil {
-				if id >= minPodID && id <= maxPodID {
-					usedIDs = append(usedIDs, id)
-				}
-			}
+		if id, ok := parsePodIDFromPoolName(pool.PoolID); ok && id >= minPodID && id <= maxPodID {
+			usedIDs = append(usedIDs, id)
 		}
 	}
 

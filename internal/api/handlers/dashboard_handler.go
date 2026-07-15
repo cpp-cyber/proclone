@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cpp-cyber/proclone/internal/cloning"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -91,7 +92,14 @@ func (dh *DashboardHandler) GetUserDashboardStatsHandler(c *gin.Context) {
 
 	// Loop through the user's deployed pods and add template information
 	for i := range pods {
-		templateName := strings.Replace(strings.ToLower(pods[i].Name[5:]), fmt.Sprintf("_%s", strings.ToLower(username)), "", 1)
+		deploymentName, ok := cloning.PodPoolDeploymentName(pods[i].Name)
+		if !ok {
+			log.Printf("Error parsing pod name %s", pods[i].Name)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse pod name", "details": fmt.Sprintf("Pod %s has an invalid name", pods[i].Name)})
+			return
+		}
+
+		templateName := strings.Replace(strings.ToLower(deploymentName), fmt.Sprintf("_%s", strings.ToLower(username)), "", 1)
 		templateInfo, err := dh.cloningHandler.Service.DatabaseService.GetTemplateInfo(templateName)
 		if err != nil {
 			log.Printf("Error retrieving template info for pod %s: %v", pods[i].Name, err)
