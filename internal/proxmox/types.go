@@ -115,6 +115,7 @@ type VirtualResourceConfig struct {
 	Lock     string `json:"lock"`
 	Net0     string `json:"net0"`
 	Net1     string `json:"net1,omitempty"`
+	Agent    string `json:"agent"`
 }
 
 type VirtualResourceStatus struct {
