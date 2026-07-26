@@ -127,6 +127,18 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 		WANIPBase:      s.Config.WANIPBase,
 	}
 
+	// Skip if no agent is configured on the router
+	vmconfig, err := s.getVMConfig(node, vmid)
+	if err != nil{
+		return fmt.Errorf("failed to detect router agent: %v", err)
+	}
+	if vmconfig.Agent == ""{
+		log.Printf("No agent detected for VM %d, skipping config", vmid)
+		return nil
+	}
+
+	log.Printf("Detected router agent for VM %d", vmid)
+
 	// Wait for router agent to be pingable
 	statusReq := tools.ProxmoxAPIRequest{
 		Method:   "POST",
