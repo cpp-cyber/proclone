@@ -20,7 +20,9 @@ func (s *ProxmoxService) GetPoolVMs(poolName string) ([]VirtualResource, error) 
 	}
 
 	var poolResponse struct {
-		Members []VirtualResource `json:"members"`
+		Data []struct {
+			Members []VirtualResource `json:"members"`
+		}`json:"data"`
 	}
 	if err := s.RequestHelper.MakeRequestAndUnmarshal(req, &poolResponse); err != nil {
 		return nil, fmt.Errorf("failed to get pool VMs: %w", err)
@@ -28,7 +30,7 @@ func (s *ProxmoxService) GetPoolVMs(poolName string) ([]VirtualResource, error) 
 
 	// Filter for VMs only (type=qemu)
 	var vms []VirtualResource
-	for _, member := range poolResponse.Members {
+	for _, member := range poolResponse.Data[0].Members {
 		if member.Type == "qemu" {
 			vms = append(vms, member)
 		}
