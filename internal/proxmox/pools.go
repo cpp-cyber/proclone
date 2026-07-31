@@ -16,10 +16,10 @@ import (
 func (s *ProxmoxService) GetPoolVMs(poolName string) ([]VirtualResource, error) {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "GET",
-		Endpoint: fmt.Sprintf("/pools/%s", poolName),
+		Endpoint: fmt.Sprintf("/pools/?poolid=%s", poolName),
 	}
 
-	var poolResponse struct {
+	var poolResponse []struct {
 		Members []VirtualResource `json:"members"`
 	}
 	if err := s.RequestHelper.MakeRequestAndUnmarshal(req, &poolResponse); err != nil {
@@ -28,7 +28,7 @@ func (s *ProxmoxService) GetPoolVMs(poolName string) ([]VirtualResource, error) 
 
 	// Filter for VMs only (type=qemu)
 	var vms []VirtualResource
-	for _, member := range poolResponse.Members {
+	for _, member := range poolResponse[0].Members {
 		if member.Type == "qemu" {
 			vms = append(vms, member)
 		}
@@ -92,7 +92,7 @@ func (s *ProxmoxService) SetPoolPermission(poolName string, targetName string, i
 func (s *ProxmoxService) DeletePool(poolName string) error {
 	req := tools.ProxmoxAPIRequest{
 		Method:   "DELETE",
-		Endpoint: fmt.Sprintf("/pools/%s", poolName),
+		Endpoint: fmt.Sprintf("/pools/?poolid=%s", poolName),
 	}
 
 	_, err := s.RequestHelper.MakeRequest(req)
