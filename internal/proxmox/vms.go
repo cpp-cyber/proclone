@@ -182,11 +182,11 @@ func (s *ProxmoxService) WaitForDisk(node string, vmID int, maxWait time.Duratio
 		log.Printf("%+v", configResp)
 
 		if configResp.HardDisk != "" && configResp.Name != "" {
-			log.Printf("/nodes/%s/storage/%s/content?vmid=%d", s.Config.Nodes[0], s.Config.StorageID, vmID)
+			log.Printf("/nodes/%s/storage/%s/content?vmid=%d&content=images", s.Config.Nodes[0], s.Config.StorageID, vmID)
 
 			pendingReq := tools.ProxmoxAPIRequest{
 				Method:   "GET",
-				Endpoint: fmt.Sprintf("/nodes/%s/storage/%s/content?vmid=%d", s.Config.Nodes[0], s.Config.StorageID, vmID),
+				Endpoint: fmt.Sprintf("/nodes/%s/storage/%s/content?vmid=%d&content=images", s.Config.Nodes[0], s.Config.StorageID, vmID),
 			}
 
 			log.Printf("%+v", pendingReq)
