@@ -163,24 +163,6 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 		backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
 	}
 
-	// Add create list of vms and vm info
-	vms, err := s.GetPoolVMs(hostname)
-	if err != nil {
-		// Don't return, non fatal
-		log.Printf("Failed to get pool VMs for pool %s: %v", hostname, err)
-	}
-	var vmStringBuilder strings.Builder
-	for _, vm := range vms {
-		vmconfig, err := s.getVMConfig(vm.NodeName, vm.VmId)
-		if err != nil {
-			// Don't return, non fatal
-			log.Printf("Failed to get vm config for vmid %d: %v", vm.VmId, err)
-			continue
-		}
-		fmt.Fprintf(&vmStringBuilder, "%s|%d|%s|%s\n", vmconfig.Name, vm.VmId, vm.NodeName, vmconfig.Net0)
-	}
-	vmString := vmStringBuilder.String()
-
 	// Configure depending on router type
 	switch routerType {
 	case "pfsense":
@@ -211,8 +193,7 @@ func (s *ProxmoxService) ConfigurePodRouter(podNumber int, node string, vmid int
 		err := s.execAgentCommand(node, vmid, []string{
 			"sh",
 			"-c",
-			fmt.Sprintf("echo -e '%s' > /config/scripts/vms.txt; sed -i -e 's/{{THIRD_OCTET}}/%d/g;s/{{NETWORK_PREFIX}}/%s/g;s/{{HOSTNAME}}/%s/g' %s",
-			vmString, podNumber, config.WANIPBase, hostname, config.VYOSScriptPath),
+			fmt.Sprintf("sed -i -e 's/{{THIRD_OCTET}}/%d/g;s/{{NETWORK_PREFIX}}/%s/g;s/{{HOSTNAME}}/%s/g' %s", podNumber, config.WANIPBase, hostname, config.VYOSScriptPath),
 		})
 		if err != nil {
 			return fmt.Errorf("failed to make IP change request: %v", err)
